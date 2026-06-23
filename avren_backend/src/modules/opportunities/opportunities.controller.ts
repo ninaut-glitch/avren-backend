@@ -1,80 +1,85 @@
+// ============================================================
+// modules/opportunities/opportunities.controller.ts — CORRIGIDO
+// Remove import duplicado de Controller
+// ============================================================
 import {
-  Body, Controller, Get, Param, Patch,
-  Post, Query, ParseUUIDPipe, Req,
-} from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-import { OpportunitiesService } from './opportunities.service';
-import { CreateOpportunityDto, UpdateOpportunityDto } from './dto/create-opportunity.dto';
-import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common'
+import { JwtAuthGuard }        from '../../common/guards/jwt-auth.guard'
+import { RolesGuard }          from '../../common/guards/roles.guard'
+import { Roles }               from '../../common/decorators/roles.decorator'
+import { OpportunitiesService } from './opportunities.service'
 
-@ApiTags('Opportunities')
-@ApiBearerAuth()
-@Controller('clients/:clientId/opportunities')
-export class ClientOpportunitiesController {
-  constructor(private readonly service: OpportunitiesService) {}
-
-  private ctx(user: JwtPayload, req: any) {
-    return req.rlsContext ?? {
-      tenantId: user.tenantId, userId: user.sub, userRole: user.role,
-    };
-  }
+@Controller('opportunities')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class OpportunitiesController {
+  constructor(private readonly svc: OpportunitiesService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Lista oportunidades do cliente' })
-  findAll(
-    @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('clientId', ParseUUIDPipe) clientId: string,
-    @Query('status') status?: string,
-    @Query('page')   page  = 1,
-    @Query('limit')  limit = 20,
-  ) {
-    return this.service.findByClient(this.ctx(user, req), clientId, {
-      status, page: Number(page), limit: Number(limit),
-    });
-  }
-
-  @Post()
-  @ApiOperation({ summary: 'Cria oportunidade para o cliente' })
-  create(
-    @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('clientId', ParseUUIDPipe) clientId: string,
-    @Body() dto: CreateOpportunityDto,
-  ) {
-    return this.service.create(this.ctx(user, req), clientId, dto);
-  }
-}
-
-// Controller standalone para PATCH /opportunities/:id
-import { Controller } from '@nestjs/common';
-
-@ApiTags('Opportunities')
-@ApiBearerAuth()
-@Controller('opportunities')
-export class OpportunitiesController {
-  constructor(private readonly service: OpportunitiesService) {}
-
-  private ctx(user: JwtPayload, req: any) {
-    return req.rlsContext ?? {
-      tenantId: user.tenantId, userId: user.sub, userRole: user.role,
-    };
+  findAll(@Request() req: any, @Query() query: any) {
+    return this.svc.findAll(req.rlsContext, {
+      status:    query.status,
+      type:      query.type,
+      client_id: query.client_id,
+      page:      Number(query.page  ?? 1),
+      limit:     Number(query.limit ?? 20),
+    })
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Retorna oportunidade pelo ID' })
-  findOne(
-    @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    return this.service.findById(this.ctx(user, req), id);
+  findOne(@Request() req: any, @Param('id') id: string) {
+    return this.svc.findOne(req.rlsContext, id)
+  }
+
+  @Post()
+  @Roles('banker', 'supervisor', 'socio')
+  create(@Request() req: any, @Body() dto: any) {
+    return this.svc.create(req.rlsContext, dto)
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Atualiza status ou dados da oportunidade' })
-  update(
-    @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateOpportunityDto,
+  @Roles('banker', 'supervisor', 'socio')
+  update(@Request() req: any, @Param('id') id: string, @Body() dto: any) {
+    return this.svc.update(req.rlsContext, id, dto)
+  }
+
+  @Patch(':id/stage')
+  @Roles('banker', 'supervisor', 'socio')
+  updateStage(@Request() req: any, @Param('id') id: string, @Body() dto: any) {
+    return this.svc.updateStage(req.rlsContext, id, dto.status, dto.loss_reason)
+  }
+}
+
+// Controller secundário para rotas aninhadas em /clients/:clientId/opportunities
+@Controller('clients/:clientId/opportunities')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class ClientOpportunitiesController {
+  constructor(private readonly svc: OpportunitiesService) {}
+
+  @Get()
+  findByClient(@Request() req: any, @Param('clientId') clientId: string) {
+    return this.svc.findAll(req.rlsContext, {
+      client_id: clientId,
+      page:  1,
+      limit: 50,
+    })
+  }
+
+  @Post()
+  @Roles('banker', 'supervisor', 'socio')
+  create(
+    @Request() req: any,
+    @Param('clientId') clientId: string,
+    @Body() dto: any,
   ) {
-    return this.service.update(this.ctx(user, req), id, dto);
+    return this.svc.create(req.rlsContext, { ...dto, client_id: clientId })
   }
 }
