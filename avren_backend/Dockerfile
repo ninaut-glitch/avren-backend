@@ -4,6 +4,7 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 RUN npm run build
-RUN ls -la dist/ || echo "dist vazio"
+RUN find /app -name "main.js" 2>/dev/null || echo "main.js NAO ENCONTRADO"
+RUN ls -la /app/
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
