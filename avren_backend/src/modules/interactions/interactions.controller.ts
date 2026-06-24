@@ -34,10 +34,7 @@ export class InteractionsController {
   }
 
   @Post()
-  @ApiOperation({
-    summary: 'Registra nova interação',
-    description: 'O trigger `trg_enqueue_ai_summary` enfileira geração de resumo por IA automaticamente.',
-  })
+  @ApiOperation({ summary: 'Registra nova interação do cliente' })
   create(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('clientId', ParseUUIDPipe) clientId: string,
@@ -47,7 +44,7 @@ export class InteractionsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Detalhes de uma interação com resumo de IA' })
+  @ApiOperation({ summary: 'Detalhes de uma interação' })
   findOne(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
