@@ -36,4 +36,10 @@ export class InteractionsService {
   }
 
   async create(ctx: SessionContext, clientId: string, dto: CreateInteractionDto) {
-    return
+    return this.repo.create(ctx, clientId, dto);
+  }
+
+  async createForLead(ctx: SessionContext, leadId: string, dto: CreateInteractionDto) {
+    return this.repo.createForLead(ctx, leadId, dto);
+  }
+}
