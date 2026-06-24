@@ -18,6 +18,17 @@ export class InteractionsService {
     };
   }
 
+  async findByLead(ctx: SessionContext, leadId: string, filters: any) {
+    const { data, total } = await this.repo.findByLead(ctx, leadId, filters);
+    return {
+      data,
+      pagination: {
+        page: filters.page, limit: filters.limit,
+        total, totalPages: Math.ceil(total / filters.limit),
+      },
+    };
+  }
+
   async findById(ctx: SessionContext, id: string) {
     const row = await this.repo.findById(ctx, id);
     if (!row) throw new NotFoundException(`Interação ${id} não encontrada`);
@@ -25,6 +36,4 @@ export class InteractionsService {
   }
 
   async create(ctx: SessionContext, clientId: string, dto: CreateInteractionDto) {
-    return this.repo.create(ctx, clientId, dto);
-  }
-}
+    return
