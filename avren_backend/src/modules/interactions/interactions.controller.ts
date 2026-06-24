@@ -7,10 +7,10 @@ import { InteractionsService } from './interactions.service';
 import { CreateInteractionDto } from './dto/create-interaction.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 
-@ApiTags('Lead Interactions')
+@ApiTags('Interactions')
 @ApiBearerAuth()
-@Controller('leads/:leadId/interactions')
-export class LeadInteractionsController {
+@Controller('clients/:clientId/interactions')
+export class InteractionsController {
   constructor(private readonly service: InteractionsService) {}
 
   private ctx(user: JwtPayload, req: any) {
@@ -20,26 +20,31 @@ export class LeadInteractionsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Timeline de interações do lead' })
+  @ApiOperation({ summary: 'Timeline de interações do cliente' })
   findAll(
     @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Param('clientId', ParseUUIDPipe) clientId: string,
     @Query('type')  type?: string,
     @Query('page')  page  = 1,
     @Query('limit') limit = 20,
   ) {
-    return this.service.findByLead(this.ctx(user, req), leadId, {
+    return this.service.findByClient(this.ctx(user, req), clientId, {
       type, page: Number(page), limit: Number(limit),
     });
   }
 
   @Post()
-  @ApiOperation({ summary: 'Registra nova interação do lead' })
+  @ApiOperation({ summary: 'Registra nova interação do cliente' })
   create(
     @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Param('clientId', ParseUUIDPipe) clientId: string,
     @Body() dto: CreateInteractionDto,
   ) {
-    return this.service.createForLead(this.ctx(user, req), leadId, dto);
+    return this.service.create(this.ctx(user, req), clientId, dto);
   }
-}
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Detalhes de uma interação' })
+  findOne(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
