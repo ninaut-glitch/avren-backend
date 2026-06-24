@@ -1,17 +1,23 @@
 import {
-  Body, Controller, Get, Param, Post,
-  Query, ParseUUIDPipe, Req,
+  Body, Controller, Get, Param, Post, Patch, Delete,
+  Query, ParseUUIDPipe, Req, HttpCode,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InteractionsService } from './interactions.service';
 import { CreateInteractionDto } from './dto/create-interaction.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { Inject } from '@nestjs/common';
+import { DATABASE_CLIENT } from '../../database/database.provider';
+import { Sql } from 'postgres';
 
 @ApiTags('Lead Interactions')
 @ApiBearerAuth()
 @Controller('leads/:leadId/interactions')
 export class LeadInteractionsController {
-  constructor(private readonly service: InteractionsService) {}
+  constructor(
+    private readonly service: InteractionsService,
+    @Inject(DATABASE_CLIENT) private readonly sql: Sql,
+  ) {}
 
   private ctx(user: JwtPayload, req: any) {
     return req.rlsContext ?? {
@@ -41,5 +47,38 @@ export class LeadInteractionsController {
     @Body() dto: CreateInteractionDto,
   ) {
     return this.service.createForLead(this.ctx(user, req), leadId, dto);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Edita uma interação do lead' })
+  async update(
+    @CurrentUser() user: JwtPayload,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: any,
+  ) {
+    const [row] = await this.sql`
+      UPDATE wealth.interactions SET
+        subject      = COALESCE(${body.subject ?? null}, subject),
+        notes        = COALESCE(${body.notes ?? null}, notes),
+        occurred_at  = COALESCE(${body.occurred_at ? body.occurred_at + '::timestamptz' : null}::timestamptz, occurred_at),
+        duration_min = COALESCE(${body.duration_min ?? null}, duration_min)
+      WHERE id = ${id} AND lead_id = ${leadId}
+      RETURNING *
+    `;
+    return row;
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Deleta uma interação do lead' })
+  async remove(
+    @CurrentUser() user: JwtPayload,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.sql`
+      DELETE FROM wealth.interactions WHERE id = ${id} AND lead_id = ${leadId}
+    `;
   }
 }
