@@ -48,3 +48,7 @@ export class InteractionsController {
   findOne(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.findById(this.ctx(user, req), id);
+  }
+}
