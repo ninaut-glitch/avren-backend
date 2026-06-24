@@ -19,7 +19,6 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
   ) {
-    // Lê expiração do JWT e converte para horas para calcular expires_at da sessão
     const exp = this.config.get<string>('JWT_EXPIRES_IN', '8h');
     this.sessionTtlHours = exp.endsWith('h')
       ? parseInt(exp)
@@ -27,7 +26,6 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, ipAddress?: string, userAgent?: string) {
-    // 1. Busca usuário — sem RLS (usa service role)
     const [user] = await this.sql`
       SELECT
         id, tenant_id, business_unit_id, email,
@@ -42,13 +40,11 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
-    // 2. Valida senha
     const validPassword = await bcrypt.compare(dto.password, user.passwordHash);
     if (!validPassword) {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
-    // 3. Valida MFA se habilitado
     if (user.mfaEnabled) {
       if (!dto.mfa_code) {
         throw new UnauthorizedException('Código MFA obrigatório');
@@ -62,7 +58,6 @@ export class AuthService {
       }
     }
 
-    // 4. Gera JWT
     const payload = {
       sub:            user.id,
       email:          user.email,
@@ -70,10 +65,9 @@ export class AuthService {
       tenantId:       user.tenantId,
       businessUnitId: user.businessUnitId ?? null,
     };
+
     const accessToken = this.jwtService.sign(payload);
 
-    // 5. FIX #2: Grava sessão em auth.sessions
-    //    Armazena hash SHA-256 do token — nunca o token em plain text
     const tokenHash = createHash('sha256').update(accessToken).digest('hex');
     const expiresAt = new Date(Date.now() + this.sessionTtlHours * 3_600_000);
 
@@ -88,7 +82,6 @@ export class AuthService {
       )
     `;
 
-    // 6. Atualiza last_login_at
     await this.sql`
       UPDATE auth.users SET last_login_at = NOW() WHERE id = ${user.id}
     `;
@@ -107,7 +100,6 @@ export class AuthService {
     };
   }
 
-  // FIX #2: logout invalida a sessão no banco via hash do token
   async logout(rawToken: string) {
     if (rawToken) {
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');
@@ -118,7 +110,6 @@ export class AuthService {
     return { message: 'Sessão encerrada' };
   }
 
-  // Valida se a sessão ainda está ativa (para middleware opcional)
   async isSessionActive(rawToken: string): Promise<boolean> {
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
     const [session] = await this.sql`
@@ -128,5 +119,17 @@ export class AuthService {
       LIMIT 1
     `;
     return !!session;
+  }
+
+  async listBankers(tenantId: string) {
+    const rows = await this.sql`
+      SELECT id, full_name, role, email
+      FROM auth.users
+      WHERE tenant_id = ${tenantId}
+        AND is_active = true
+        AND role IN ('banker', 'supervisor', 'socio')
+      ORDER BY full_name ASC
+    `;
+    return rows;
   }
 }
