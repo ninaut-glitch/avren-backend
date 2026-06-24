@@ -133,23 +133,4 @@ export class InteractionsRepository {
       return row;
     });
   }
-}        INSERT INTO wealth.interactions (
-          client_id, lead_id, banker_id, relationship_id,
-          type, subject, notes, occurred_at, duration_min
-        ) VALUES (
-          ${clientId},
-          ${dto.lead_id         ?? null},
-          ${ctx.userId},
-          ${dto.relationship_id ?? null},
-          ${dto.type},
-          ${dto.subject},
-          ${dto.notes           ?? null},
-          ${dto.occurred_at}::timestamptz,
-          ${dto.duration_min    ?? null}
-        )
-        RETURNING *
-      `;
-      return row;
-    });
-  }
 }
