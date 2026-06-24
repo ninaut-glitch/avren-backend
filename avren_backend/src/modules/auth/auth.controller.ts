@@ -15,11 +15,7 @@ export class AuthController {
   @Post('login')
   @ApiOperation({ summary: 'Login com email e senha' })
   login(@Body() dto: LoginDto, @Req() req: FastifyRequest) {
-    return this.authService.login(
-      dto,
-      req.ip,
-      req.headers['user-agent'],
-    );
+    return this.authService.login(dto, req.ip, req.headers['user-agent']);
   }
 
   @Post('logout')
@@ -36,5 +32,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Retorna o usuário autenticado' })
   me(@CurrentUser() user: JwtPayload) {
     return user;
+  }
+
+  @Get('bankers')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Lista todos os bankers do tenant' })
+  bankers(@CurrentUser() user: JwtPayload) {
+    return this.authService.listBankers(user.tenantId);
   }
 }
