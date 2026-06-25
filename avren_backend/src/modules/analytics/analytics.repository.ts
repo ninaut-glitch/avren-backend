@@ -7,11 +7,25 @@ import { withRls, SessionContext } from '../../database/rls.helper';
 export class AnalyticsRepository {
   constructor(@Inject(DATABASE_CLIENT) private readonly sql: Sql) {}
 
-  async getExecutiveDashboard(ctx: SessionContext, month?: string) {
+  async getExecutiveDashboard(ctx: SessionContext, month?: string, period?: string) {
     return withRls(this.sql, ctx, async (tx) => {
-      // FIX #1: targetMonth é passado às queries, não ignorado
-      // Formato esperado: 'YYYY-MM' → normalizado para primeiro dia do mês
       const billingMonth = month ? `${month}-01` : null
+
+      // Calcula o intervalo de datas baseado no período
+      let dateFrom: string
+      let dateTo: string
+
+      if (period === 'semana') {
+        dateFrom = `date_trunc('week', NOW())`
+        dateTo   = `NOW()`
+      } else if (period === 'mes_anterior') {
+        dateFrom = `date_trunc('month', NOW() - interval '1 month')`
+        dateTo   = `date_trunc('month', NOW())`
+      } else {
+        // mes_atual (default)
+        dateFrom = `date_trunc('month', COALESCE(${billingMonth}::date, NOW()::date))`
+        dateTo   = `NOW()`
+      }
 
       const [aum] = await tx`
         SELECT
@@ -43,11 +57,43 @@ export class AnalyticsRepository {
                   )
           )::int AS conversoes_mes
         FROM crm.leads
-        WHERE tenant_id   = ${ctx.tenantId}
+        WHERE tenant_id  = ${ctx.tenantId}
           AND created_at >= date_trunc(
                 'month',
                 COALESCE(${billingMonth}::date, NOW()::date)
               )
+      `
+
+      // Novos KPIs de pipeline
+      const [pipeline] = await tx`
+        SELECT
+          COUNT(*)::int                          AS leads_cadastrados,
+          COALESCE(SUM(estimated_aum), 0)        AS potencial_captacao
+        FROM crm.leads
+        WHERE tenant_id = ${ctx.tenantId}
+          AND stage     != 'cliente_ativo'
+      `
+
+      const [contatos] = await tx`
+        SELECT COUNT(*)::int AS contatos_registrados
+        FROM wealth.interactions i
+        JOIN crm.leads l ON l.id = i.lead_id
+        WHERE l.tenant_id = ${ctx.tenantId}
+      `
+
+      // KPIs do período selecionado
+      const [periodo] = await tx`
+        SELECT
+          COUNT(DISTINCT l.id)::int AS leads_periodo,
+          COUNT(DISTINCT i.id)::int AS contatos_periodo
+        FROM crm.leads l
+        LEFT JOIN wealth.interactions i
+          ON i.lead_id = l.id
+          AND i.occurred_at >= ${dateFrom}::timestamptz
+          AND i.occurred_at <= ${dateTo}::timestamptz
+        WHERE l.tenant_id  = ${ctx.tenantId}
+          AND l.created_at >= ${dateFrom}::timestamptz
+          AND l.created_at <= ${dateTo}::timestamptz
       `
 
       const bankers = await tx`
@@ -62,13 +108,18 @@ export class AnalyticsRepository {
           : 0
 
       return {
-        aum_total:       Number(aum.aumTotal),
-        mrr:             Number(mrr.mrr),
-        captacao_mes:    Number(aum.aumTotal),
-        clientes_ativos: aum.clientesAtivos,
-        leads_mes:       leads.leadsMes,
-        conversoes_mes:  leads.conversoesMes,
-        taxa_conversao:  taxaConversao,
+        aum_total:             Number(aum.aumTotal),
+        mrr:                   Number(mrr.mrr),
+        captacao_mes:          Number(aum.aumTotal),
+        clientes_ativos:       aum.clientesAtivos,
+        leads_mes:             leads.leadsMes,
+        conversoes_mes:        leads.conversoesMes,
+        taxa_conversao:        taxaConversao,
+        leads_cadastrados:     pipeline.leadsCadastrados,
+        potencial_captacao:    Number(pipeline.potencialCaptacao),
+        contatos_registrados:  contatos.contatosRegistrados,
+        leads_periodo:         periodo.leadsPeriodo,
+        contatos_periodo:      periodo.contatosPeriodo,
         bankers,
       }
     })
@@ -85,8 +136,6 @@ export class AnalyticsRepository {
   }
 
   async refreshAumSummary() {
-    // CONCURRENTLY não bloqueia leituras durante refresh
-    // Requer UNIQUE INDEX em wealth.aum_summary(client_id) — criado em 016_fixes.sql
     await this.sql`
       REFRESH MATERIALIZED VIEW CONCURRENTLY wealth.aum_summary
     `
