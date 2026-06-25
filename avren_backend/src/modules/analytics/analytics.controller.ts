@@ -18,12 +18,13 @@ export class AnalyticsController {
   dashboard(
     @CurrentUser() user: JwtPayload,
     @Req() req: any,
-    @Query('month') month?: string,
+    @Query('month')  month?:  string,
+    @Query('period') period?: string,
   ) {
     const ctx = req.rlsContext ?? {
       tenantId: user.tenantId, userId: user.sub, userRole: user.role,
     };
-    return this.repo.getExecutiveDashboard(ctx, month);
+    return this.repo.getExecutiveDashboard(ctx, month, period);
   }
 
   @Get('bankers')
