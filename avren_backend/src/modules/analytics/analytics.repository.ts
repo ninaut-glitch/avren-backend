@@ -3,6 +3,30 @@ import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../database/database.provider';
 import { withRls, SessionContext } from '../../database/rls.helper';
 
+function getPeriodDates(period?: string): { dateFrom: Date; dateTo: Date } {
+  const now = new Date()
+  const dateTo = new Date(now)
+
+  if (period === 'semana') {
+    const day = now.getDay()
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1)
+    const dateFrom = new Date(now)
+    dateFrom.setDate(diff)
+    dateFrom.setHours(0, 0, 0, 0)
+    return { dateFrom, dateTo }
+  }
+
+  if (period === 'mes_anterior') {
+    const dateFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const dateTo2  = new Date(now.getFullYear(), now.getMonth(), 1)
+    return { dateFrom, dateTo: dateTo2 }
+  }
+
+  // mes_atual (default)
+  const dateFrom = new Date(now.getFullYear(), now.getMonth(), 1)
+  return { dateFrom, dateTo }
+}
+
 @Injectable()
 export class AnalyticsRepository {
   constructor(@Inject(DATABASE_CLIENT) private readonly sql: Sql) {}
@@ -10,22 +34,7 @@ export class AnalyticsRepository {
   async getExecutiveDashboard(ctx: SessionContext, month?: string, period?: string) {
     return withRls(this.sql, ctx, async (tx) => {
       const billingMonth = month ? `${month}-01` : null
-
-      // Calcula o intervalo de datas baseado no período
-      let dateFrom: string
-      let dateTo: string
-
-      if (period === 'semana') {
-        dateFrom = `date_trunc('week', NOW())`
-        dateTo   = `NOW()`
-      } else if (period === 'mes_anterior') {
-        dateFrom = `date_trunc('month', NOW() - interval '1 month')`
-        dateTo   = `date_trunc('month', NOW())`
-      } else {
-        // mes_atual (default)
-        dateFrom = `date_trunc('month', COALESCE(${billingMonth}::date, NOW()::date))`
-        dateTo   = `NOW()`
-      }
+      const { dateFrom, dateTo } = getPeriodDates(period)
 
       const [aum] = await tx`
         SELECT
@@ -64,11 +73,10 @@ export class AnalyticsRepository {
               )
       `
 
-      // Novos KPIs de pipeline
       const [pipeline] = await tx`
         SELECT
-          COUNT(*)::int                          AS leads_cadastrados,
-          COALESCE(SUM(estimated_aum), 0)        AS potencial_captacao
+          COUNT(*)::int                   AS leads_cadastrados,
+          COALESCE(SUM(estimated_aum), 0) AS potencial_captacao
         FROM crm.leads
         WHERE tenant_id = ${ctx.tenantId}
           AND stage     != 'cliente_ativo'
@@ -81,7 +89,6 @@ export class AnalyticsRepository {
         WHERE l.tenant_id = ${ctx.tenantId}
       `
 
-      // KPIs do período selecionado
       const [periodo] = await tx`
         SELECT
           COUNT(DISTINCT l.id)::int AS leads_periodo,
@@ -89,11 +96,11 @@ export class AnalyticsRepository {
         FROM crm.leads l
         LEFT JOIN wealth.interactions i
           ON i.lead_id = l.id
-          AND i.occurred_at >= ${dateFrom}::timestamptz
-          AND i.occurred_at <= ${dateTo}::timestamptz
+          AND i.occurred_at >= ${dateFrom.toISOString()}::timestamptz
+          AND i.occurred_at <= ${dateTo.toISOString()}::timestamptz
         WHERE l.tenant_id  = ${ctx.tenantId}
-          AND l.created_at >= ${dateFrom}::timestamptz
-          AND l.created_at <= ${dateTo}::timestamptz
+          AND l.created_at >= ${dateFrom.toISOString()}::timestamptz
+          AND l.created_at <= ${dateTo.toISOString()}::timestamptz
       `
 
       const bankers = await tx`
@@ -108,18 +115,18 @@ export class AnalyticsRepository {
           : 0
 
       return {
-        aum_total:             Number(aum.aumTotal),
-        mrr:                   Number(mrr.mrr),
-        captacao_mes:          Number(aum.aumTotal),
-        clientes_ativos:       aum.clientesAtivos,
-        leads_mes:             leads.leadsMes,
-        conversoes_mes:        leads.conversoesMes,
-        taxa_conversao:        taxaConversao,
-        leads_cadastrados:     pipeline.leadsCadastrados,
-        potencial_captacao:    Number(pipeline.potencialCaptacao),
-        contatos_registrados:  contatos.contatosRegistrados,
-        leads_periodo:         periodo.leadsPeriodo,
-        contatos_periodo:      periodo.contatosPeriodo,
+        aum_total:            Number(aum.aumTotal),
+        mrr:                  Number(mrr.mrr),
+        captacao_mes:         Number(aum.aumTotal),
+        clientes_ativos:      aum.clientesAtivos,
+        leads_mes:            leads.leadsMes,
+        conversoes_mes:       leads.conversoesMes,
+        taxa_conversao:       taxaConversao,
+        leads_cadastrados:    pipeline.leadsCadastrados,
+        potencial_captacao:   Number(pipeline.potencialCaptacao),
+        contatos_registrados: contatos.contatosRegistrados,
+        leads_periodo:        periodo.leadsPeriodo,
+        contatos_periodo:     periodo.contatosPeriodo,
         bankers,
       }
     })
