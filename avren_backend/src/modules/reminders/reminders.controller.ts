@@ -10,19 +10,23 @@ export class RemindersController {
   constructor(private readonly service: RemindersService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Lista lembretes do usuário' })
+  @ApiOperation({ summary: 'Lista lembretes — sócio vê todos, banker vê os seus' })
   findAll(
     @CurrentUser() user: JwtPayload,
     @Query('date') date?: string,
     @Query('done') done?: string,
   ) {
-    return this.service.findAll(user.tenantId, user.sub, { date, done: done === 'true' });
+    const isSocio = user.role === 'socio' || user.role === 'supervisor'
+    if (isSocio) {
+      return this.service.findAllTenant(user.tenantId, { date, done: done === 'true' })
+    }
+    return this.service.findAll(user.tenantId, user.sub, { date, done: done === 'true' })
   }
 
   @Post()
   @ApiOperation({ summary: 'Cria um lembrete' })
   create(@CurrentUser() user: JwtPayload, @Body() body: any) {
-    return this.service.create(user.tenantId, user.sub, body);
+    return this.service.create(user.tenantId, user.sub, body)
   }
 
   @Patch(':id')
@@ -32,6 +36,6 @@ export class RemindersController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: any,
   ) {
-    return this.service.update(user.sub, id, body);
+    return this.service.update(user.sub, id, body)
   }
 }
