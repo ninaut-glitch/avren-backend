@@ -14,13 +14,13 @@ import { AnalyticsModule }     from './modules/analytics/analytics.module';
 import { CommunityModule }     from './modules/community/community.module';
 import { AiModule }            from './modules/ai/ai.module';
 import { RemindersModule }     from './modules/reminders/reminders.module';
+import { VisitsModule }        from './modules/visits/visits.module';
 import { JwtAuthGuard }          from './common/guards/jwt.guard';
 import { RolesGuard }            from './common/guards/roles.guard';
 import { RlsInterceptor }        from './common/interceptors/rls.interceptor';
 import { AuditInterceptor }      from './common/interceptors/audit.interceptor';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 import { globalValidationPipe }  from './common/pipes/validation.pipe';
-
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
@@ -40,6 +40,7 @@ import { globalValidationPipe }  from './common/pipes/validation.pipe';
     CommunityModule,
     AiModule,
     RemindersModule,
+    VisitsModule,
   ],
   providers: [
     { provide: APP_GUARD,       useClass: ThrottlerGuard },
