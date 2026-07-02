@@ -21,41 +21,41 @@ export class VisitsController {
   @Get()
   @ApiOperation({ summary: 'Lista visitas (banker vê as próprias, sócio vê todas)' })
   findAll(@CurrentUser() user: JwtPayload, @Req() req: any) {
-    const { tenantId, userId, userRole } = this.ctx(user, req);
-    return userRole === 'socio'
-      ? this.service.findAllTenant(tenantId)
-      : this.service.findAll(tenantId, userId);
+    const c = this.ctx(user, req);
+    return c.userRole === 'socio'
+      ? this.service.findAllTenant(c.tenantId)
+      : this.service.findAll(c.tenantId, c.userId);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Detalhe de uma visita (payload completo)' })
+  @ApiOperation({ summary: 'Detalhe de uma visita' })
   findOne(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    const { tenantId } = this.ctx(user, req);
-    return this.service.findOne(tenantId, id);
+    const c = this.ctx(user, req);
+    return this.service.findOne(c.tenantId, id);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Salva visita + cria lead, interação e reminder da devolutiva' })
+  @ApiOperation({ summary: 'Salva visita: cria lead, interação e reminder da devolutiva' })
   create(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Body() body: any,
   ) {
-    const { tenantId, userId } = this.ctx(user, req);
-    return this.service.create(tenantId, userId, body);
+    const c = this.ctx(user, req);
+    return this.service.create(c.tenantId, c.userId, body);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Atualiza uma visita salva (não recria lead nem reminder)' })
+  @ApiOperation({ summary: 'Atualiza o diagnóstico de uma visita salva' })
   update(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: any,
   ) {
-    const { tenantId, userId, userRole } = this.ctx(user, req);
-    return this.service.update(tenantId, userId, userRole, id, body);
+    const c = this.ctx(user, req);
+    return this.service.update(c.tenantId, c.userId, id, body);
   }
 
   @Delete(':id')
@@ -64,7 +64,7 @@ export class VisitsController {
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    const { tenantId, userId, userRole } = this.ctx(user, req);
-    return this.service.remove(tenantId, userId, userRole, id);
+    const c = this.ctx(user, req);
+    return this.service.remove(c.tenantId, c.userId, id, c.userRole === 'socio');
   }
 }
