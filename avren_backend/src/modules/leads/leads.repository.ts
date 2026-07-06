@@ -21,24 +21,47 @@ export class LeadsRepository {
     return withRls(this.sql, ctx, async (tx) => {
       const offset = (filters.page - 1) * filters.limit;
 
+      // Visibilidade por papel:
+      // - banker: vê SOMENTE os próprios leads (ignora filtro banker_id)
+      // - demais papéis (socio, admin, supervisor, operacoes): veem todos
+      //   e podem filtrar por responsável, inclusive "sem responsável"
+      //   (banker_id = 'none' na query string)
+      const isBanker = ctx.userRole === 'banker';
+
+      const bankerFilter = isBanker
+        ? tx`AND l.banker_id = ${ctx.userId}`
+        : filters.banker_id === 'none'
+          ? tx`AND l.banker_id IS NULL`
+          : filters.banker_id
+            ? tx`AND l.banker_id = ${filters.banker_id}`
+            : tx``;
+
       const rows = await tx`
         SELECT l.*, u.full_name AS banker_name
         FROM crm.leads l
-        JOIN auth.users u ON u.id = l.banker_id
+        LEFT JOIN auth.users u ON u.id = l.banker_id
         WHERE TRUE
-          ${filters.stage     ? tx`AND l.stage     = ${filters.stage}`     : tx``}
-          ${filters.banker_id ? tx`AND l.banker_id = ${filters.banker_id}` : tx``}
-          ${filters.priority  ? tx`AND l.priority  = ${filters.priority}`  : tx``}
+          ${bankerFilter}
+          ${filters.stage    ? tx`AND l.stage    = ${filters.stage}`    : tx``}
+          ${filters.priority ? tx`AND l.priority = ${filters.priority}` : tx``}
         ORDER BY l.updated_at DESC
         LIMIT ${filters.limit} OFFSET ${offset}
       `;
 
+      const countBankerFilter = isBanker
+        ? tx`AND banker_id = ${ctx.userId}`
+        : filters.banker_id === 'none'
+          ? tx`AND banker_id IS NULL`
+          : filters.banker_id
+            ? tx`AND banker_id = ${filters.banker_id}`
+            : tx``;
+
       const [{ count }] = await tx`
         SELECT COUNT(*)::int AS count FROM crm.leads
         WHERE TRUE
-          ${filters.stage     ? tx`AND stage     = ${filters.stage}`     : tx``}
-          ${filters.banker_id ? tx`AND banker_id = ${filters.banker_id}` : tx``}
-          ${filters.priority  ? tx`AND priority  = ${filters.priority}`  : tx``}
+          ${countBankerFilter}
+          ${filters.stage    ? tx`AND stage    = ${filters.stage}`    : tx``}
+          ${filters.priority ? tx`AND priority = ${filters.priority}` : tx``}
       `;
 
       return { data: rows, total: count };
@@ -47,11 +70,18 @@ export class LeadsRepository {
 
   async findById(ctx: SessionContext, id: string) {
     return withRls(this.sql, ctx, async (tx) => {
+      // Banker só consegue abrir os próprios leads
+      const scope =
+        ctx.userRole === 'banker'
+          ? tx`AND l.banker_id = ${ctx.userId}`
+          : tx``;
+
       const [row] = await tx`
         SELECT l.*, u.full_name AS banker_name
         FROM crm.leads l
-        JOIN auth.users u ON u.id = l.banker_id
+        LEFT JOIN auth.users u ON u.id = l.banker_id
         WHERE l.id = ${id}
+          ${scope}
       `;
       return row ?? null;
     });
@@ -59,6 +89,10 @@ export class LeadsRepository {
 
   async create(ctx: SessionContext, dto: CreateLeadDto) {
     return withRls(this.sql, ctx, async (tx) => {
+      // Banker sempre cria leads para si mesmo, independente do payload
+      const bankerId =
+        ctx.userRole === 'banker' ? ctx.userId : (dto.banker_id ?? null);
+
       const [row] = await tx`
         INSERT INTO crm.leads (
           tenant_id, full_name, email, phone, banker_id,
@@ -68,7 +102,7 @@ export class LeadsRepository {
           ${dto.full_name},
           ${dto.email          ?? null},
           ${dto.phone          ?? null},
-          ${dto.banker_id},
+          ${bankerId},
           ${dto.origem_tipo    ?? null},
           ${dto.contexto_relacionamento ?? null},
           ${dto.estimated_aum  ?? null},
@@ -83,6 +117,12 @@ export class LeadsRepository {
   // FIX #1: método update separado de create
   async update(ctx: SessionContext, id: string, dto: Partial<CreateLeadDto>) {
     return withRls(this.sql, ctx, async (tx) => {
+      // Banker só edita os próprios leads
+      const scope =
+        ctx.userRole === 'banker'
+          ? tx`AND banker_id = ${ctx.userId}`
+          : tx``;
+
       const [row] = await tx`
         UPDATE crm.leads
         SET
@@ -95,6 +135,7 @@ export class LeadsRepository {
           estimated_aum           = COALESCE(${dto.estimated_aum        ?? null}, estimated_aum),
           priority                = COALESCE(${dto.priority             ?? null}, priority)
         WHERE id = ${id}
+          ${scope}
         RETURNING *
       `;
       return row ?? null;
@@ -103,6 +144,12 @@ export class LeadsRepository {
 
   async updateStage(ctx: SessionContext, id: string, dto: UpdateLeadStageDto) {
     return withRls(this.sql, ctx, async (tx) => {
+      // Banker só movimenta os próprios leads
+      const scope =
+        ctx.userRole === 'banker'
+          ? tx`AND banker_id = ${ctx.userId}`
+          : tx``;
+
       const [row] = await tx`
         UPDATE crm.leads
         SET
@@ -114,6 +161,7 @@ export class LeadsRepository {
                            ELSE converted_at
                          END
         WHERE id = ${id}
+          ${scope}
         RETURNING *
       `;
       return row ?? null;
