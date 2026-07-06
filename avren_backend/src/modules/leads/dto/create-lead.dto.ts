@@ -37,9 +37,12 @@ export class CreateLeadDto {
   @IsString()
   phone?: string;
 
-  @ApiProperty()
+  // Opcional: banker cria para si mesmo automaticamente (resolvido no backend);
+  // sócio envia o responsável escolhido no formulário
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  banker_id: string;
+  banker_id?: string;
 
   @ApiPropertyOptional({ enum: OrigemTipo })
   @IsOptional()
@@ -77,9 +80,4 @@ export class UpdateLeadStageDto {
   @IsOptional()
   @IsString()
   loss_notes?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
-  notes?: string;
 }
