@@ -25,9 +25,9 @@ export class CommunityController {
   @ApiOperation({ summary: 'Lista eventos do Members Club' })
   findAll(
     @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Query('from')  from?: string,
-    @Query('to')    to?: string,
-    @Query('page')  page  = 1,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page = 1,
     @Query('limit') limit = 20,
   ) {
     return this.service.findEvents(this.ctx(user, req), {
@@ -63,7 +63,7 @@ export class CommunityController {
   }
 
   @Post(':id/participants')
-  @ApiOperation({ summary: 'Convida cliente para o evento' })
+  @ApiOperation({ summary: 'Convida cliente ou lead para o evento' })
   addParticipant(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
@@ -72,14 +72,14 @@ export class CommunityController {
     return this.service.addParticipant(this.ctx(user, req), id, dto);
   }
 
-  @Patch(':id/participants/:clientId')
+  @Patch(':id/participants/:participantId')
   @ApiOperation({ summary: 'Atualiza status de presença do participante' })
   updateStatus(
     @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Param('id', ParseUUIDPipe)       id: string,
-    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
     @Body() dto: UpdateParticipantStatusDto,
   ) {
-    return this.service.updateParticipantStatus(this.ctx(user, req), id, clientId, dto);
+    return this.service.updateParticipantStatus(this.ctx(user, req), id, participantId, dto);
   }
 }
