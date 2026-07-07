@@ -1,5 +1,5 @@
 import {
-  ConflictException, Injectable, NotFoundException,
+  BadRequestException, ConflictException, Injectable, NotFoundException,
 } from '@nestjs/common';
 import { CommunityRepository } from './community.repository';
 import {
@@ -39,18 +39,25 @@ export class CommunityService {
 
   async addParticipant(ctx: SessionContext, eventId: string, dto: AddParticipantDto) {
     await this.findById(ctx, eventId);
+
+    const hasClient = !!dto.client_id;
+    const hasLead = !!dto.lead_id;
+    if (hasClient === hasLead) {
+      throw new BadRequestException('Informe client_id OU lead_id (exatamente um).');
+    }
+
     const participant = await this.repo.addParticipant(ctx, eventId, dto);
     if (!participant) {
-      throw new ConflictException('Cliente já convidado para este evento');
+      throw new ConflictException('Convidado já adicionado a este evento');
     }
     return participant;
   }
 
   async updateParticipantStatus(
     ctx: SessionContext, eventId: string,
-    clientId: string, dto: UpdateParticipantStatusDto,
+    participantId: string, dto: UpdateParticipantStatusDto,
   ) {
-    const row = await this.repo.updateParticipantStatus(ctx, eventId, clientId, dto);
+    const row = await this.repo.updateParticipantStatus(ctx, eventId, participantId, dto);
     if (!row) throw new NotFoundException('Participante não encontrado neste evento');
     return row;
   }
