@@ -32,6 +32,11 @@ export class CommunityService {
     return this.repo.create(ctx, dto);
   }
 
+  async remove(ctx: SessionContext, eventId: string) {
+    await this.findById(ctx, eventId);
+    await this.repo.deleteEvent(ctx, eventId);
+  }
+
   async findParticipants(ctx: SessionContext, eventId: string) {
     await this.findById(ctx, eventId);
     return this.repo.findParticipants(ctx, eventId);
@@ -60,5 +65,10 @@ export class CommunityService {
     const row = await this.repo.updateParticipantStatus(ctx, eventId, participantId, dto);
     if (!row) throw new NotFoundException('Participante não encontrado neste evento');
     return row;
+  }
+
+  async removeParticipant(ctx: SessionContext, eventId: string, participantId: string) {
+    const ok = await this.repo.removeParticipant(ctx, eventId, participantId);
+    if (!ok) throw new NotFoundException('Participante não encontrado neste evento');
   }
 }
