@@ -25,7 +25,7 @@ export class CommunityRepository {
         LEFT JOIN community.event_participants ep ON ep.event_id = e.id
         WHERE TRUE
           ${filters.from ? tx`AND e.event_date >= ${filters.from}::timestamptz` : tx``}
-          ${filters.to   ? tx`AND e.event_date <= ${filters.to}::timestamptz`   : tx``}
+          ${filters.to ? tx`AND e.event_date <= ${filters.to}::timestamptz` : tx``}
         GROUP BY e.id, u.full_name
         ORDER BY e.event_date DESC
         LIMIT ${filters.limit} OFFSET ${offset}
@@ -34,7 +34,7 @@ export class CommunityRepository {
         SELECT COUNT(*)::int AS count FROM community.events
         WHERE TRUE
           ${filters.from ? tx`AND event_date >= ${filters.from}::timestamptz` : tx``}
-          ${filters.to   ? tx`AND event_date <= ${filters.to}::timestamptz`   : tx``}
+          ${filters.to ? tx`AND event_date <= ${filters.to}::timestamptz` : tx``}
       `;
       return { data: rows, total: count };
     });
@@ -63,9 +63,9 @@ export class CommunityRepository {
           ${dto.business_unit_id ?? null},
           ${dto.title},
           ${dto.event_date}::timestamptz,
-          ${dto.location    ?? null},
-          ${dto.modality    ?? 'presencial'},
-          ${dto.capacity    ?? null},
+          ${dto.location ?? null},
+          ${dto.modality ?? 'presencial'},
+          ${dto.capacity ?? null},
           ${dto.description ?? null},
           ${ctx.userId}
         )
@@ -79,13 +79,17 @@ export class CommunityRepository {
     return withRls(this.sql, ctx, async (tx) => tx`
       SELECT
         ep.*,
-        c.full_name  AS client_name,
-        u.full_name  AS invited_by_name
+        COALESCE(c.full_name, l.full_name)          AS participant_name,
+        CASE WHEN ep.lead_id IS NOT NULL
+             THEN 'lead' ELSE 'client' END          AS participant_type,
+        COALESCE(c.full_name, l.full_name)          AS client_name,
+        u.full_name                                 AS invited_by_name
       FROM community.event_participants ep
-      JOIN  wealth.clients c ON c.id = ep.client_id
-      LEFT JOIN auth.users u ON u.id = ep.invited_by
+      LEFT JOIN wealth.clients c ON c.id = ep.client_id
+      LEFT JOIN crm.leads     l ON l.id = ep.lead_id
+      LEFT JOIN auth.users    u ON u.id = ep.invited_by
       WHERE ep.event_id = ${eventId}
-      ORDER BY ep.status, c.full_name
+      ORDER BY ep.status, participant_name
     `);
   }
 
@@ -93,10 +97,10 @@ export class CommunityRepository {
     return withRls(this.sql, ctx, async (tx) => {
       const [row] = await tx`
         INSERT INTO community.event_participants
-          (event_id, client_id, invited_by, notes)
+          (event_id, client_id, lead_id, invited_by, notes)
         VALUES
-          (${eventId}, ${dto.client_id}, ${ctx.userId}, ${dto.notes ?? null})
-        ON CONFLICT (event_id, client_id) DO NOTHING
+          (${eventId}, ${dto.client_id ?? null}, ${dto.lead_id ?? null}, ${ctx.userId}, ${dto.notes ?? null})
+        ON CONFLICT DO NOTHING
         RETURNING *
       `;
       return row ?? null;
@@ -106,14 +110,14 @@ export class CommunityRepository {
   async updateParticipantStatus(
     ctx: SessionContext,
     eventId: string,
-    clientId: string,
+    participantId: string,
     dto: UpdateParticipantStatusDto,
   ) {
     return withRls(this.sql, ctx, async (tx) => {
       const [row] = await tx`
         UPDATE community.event_participants
         SET status = ${dto.status}
-        WHERE event_id = ${eventId} AND client_id = ${clientId}
+        WHERE id = ${participantId} AND event_id = ${eventId}
         RETURNING *
       `;
       return row ?? null;
