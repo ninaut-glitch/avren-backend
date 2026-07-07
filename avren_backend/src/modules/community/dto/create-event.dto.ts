@@ -6,15 +6,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum EventModality {
   PRESENCIAL = 'presencial',
-  ONLINE     = 'online',
-  HIBRIDO    = 'hibrido',
+  ONLINE = 'online',
+  HIBRIDO = 'hibrido',
 }
 
 export enum ParticipantStatus {
-  INVITED   = 'invited',
+  INVITED = 'invited',
   CONFIRMED = 'confirmed',
-  ATTENDED  = 'attended',
-  NO_SHOW   = 'no_show',
+  ATTENDED = 'attended',
+  NO_SHOW = 'no_show',
 }
 
 export class CreateEventDto {
@@ -55,9 +55,17 @@ export class CreateEventDto {
 }
 
 export class AddParticipantDto {
-  @ApiProperty()
+  // Informe exatamente UM: client_id (cliente cadastrado) OU lead_id (prospect).
+  // A validação de "exatamente um" é feita no CommunityService.
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  client_id: string;
+  client_id?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  lead_id?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
