@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Param, Patch,
+  Body, Controller, Get, Param, Patch, Delete, HttpCode,
   Post, Query, ParseUUIDPipe, Req,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -53,6 +53,16 @@ export class CommunityController {
     return this.service.findById(this.ctx(user, req), id);
   }
 
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Exclui um evento (e seus participantes)' })
+  remove(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.remove(this.ctx(user, req), id);
+  }
+
   @Get(':id/participants')
   @ApiOperation({ summary: 'Lista participantes do evento' })
   findParticipants(
@@ -81,5 +91,16 @@ export class CommunityController {
     @Body() dto: UpdateParticipantStatusDto,
   ) {
     return this.service.updateParticipantStatus(this.ctx(user, req), id, participantId, dto);
+  }
+
+  @Delete(':id/participants/:participantId')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Remove um convidado do evento' })
+  removeParticipant(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('participantId', ParseUUIDPipe) participantId: string,
+  ) {
+    return this.service.removeParticipant(this.ctx(user, req), id, participantId);
   }
 }
