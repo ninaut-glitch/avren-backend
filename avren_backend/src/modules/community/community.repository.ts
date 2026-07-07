@@ -75,6 +75,13 @@ export class CommunityRepository {
     });
   }
 
+  async deleteEvent(ctx: SessionContext, eventId: string) {
+    // event_participants tem ON DELETE CASCADE, então os convidados saem junto
+    return withRls(this.sql, ctx, async (tx) => {
+      await tx`DELETE FROM community.events WHERE id = ${eventId}`;
+    });
+  }
+
   async findParticipants(ctx: SessionContext, eventId: string) {
     return withRls(this.sql, ctx, async (tx) => tx`
       SELECT
@@ -121,6 +128,17 @@ export class CommunityRepository {
         RETURNING *
       `;
       return row ?? null;
+    });
+  }
+
+  async removeParticipant(ctx: SessionContext, eventId: string, participantId: string) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const rows = await tx`
+        DELETE FROM community.event_participants
+        WHERE id = ${participantId} AND event_id = ${eventId}
+        RETURNING id
+      `;
+      return rows.length > 0;
     });
   }
 }
