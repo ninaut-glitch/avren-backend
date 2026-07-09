@@ -8,12 +8,12 @@ export class RemindersService {
 
   async findAll(tenantId: string, userId: string, filters: { date?: string; done?: boolean }) {
     return this.sql`
-      SELECT r.*, l.full_name AS lead_name, u.full_name AS user_name
+      SELECT r.*, l.full_name AS lead_name, l.phone AS lead_phone, u.full_name AS user_name
       FROM crm.reminders r
       JOIN auth.users u ON u.id = r.user_id
       LEFT JOIN crm.leads l ON l.id = r.lead_id
       WHERE r.tenant_id = ${tenantId}
-        AND r.user_id   = ${userId}
+        AND r.user_id = ${userId}
         ${filters.done != null ? this.sql`AND r.done = ${filters.done}` : this.sql``}
         ${filters.date ? this.sql`AND r.remind_at = ${filters.date}::date` : this.sql``}
       ORDER BY r.remind_at ASC, r.created_at ASC
@@ -22,7 +22,7 @@ export class RemindersService {
 
   async findAllTenant(tenantId: string, filters: { date?: string; done?: boolean }) {
     return this.sql`
-      SELECT r.*, l.full_name AS lead_name, u.full_name AS user_name
+      SELECT r.*, l.full_name AS lead_name, l.phone AS lead_phone, u.full_name AS user_name
       FROM crm.reminders r
       JOIN auth.users u ON u.id = r.user_id
       LEFT JOIN crm.leads l ON l.id = r.lead_id
@@ -35,7 +35,7 @@ export class RemindersService {
 
   async findToday(tenantId: string) {
     return this.sql`
-      SELECT r.*, l.full_name AS lead_name, u.full_name AS user_name, u.email AS user_email
+      SELECT r.*, l.full_name AS lead_name, l.phone AS lead_phone, u.full_name AS user_name, u.email AS user_email
       FROM crm.reminders r
       JOIN auth.users u ON u.id = r.user_id
       LEFT JOIN crm.leads l ON l.id = r.lead_id
@@ -61,10 +61,10 @@ export class RemindersService {
   async update(userId: string, id: string, body: any) {
     const [row] = await this.sql`
       UPDATE crm.reminders SET
-        title     = COALESCE(${body.title ?? null}, title),
-        notes     = COALESCE(${body.notes ?? null}, notes),
+        title = COALESCE(${body.title ?? null}, title),
+        notes = COALESCE(${body.notes ?? null}, notes),
         remind_at = COALESCE(${body.remind_at ? body.remind_at + '::date' : null}::date, remind_at),
-        done      = COALESCE(${body.done ?? null}, done)
+        done = COALESCE(${body.done ?? null}, done)
       WHERE id = ${id} AND user_id = ${userId}
       RETURNING *
     `
