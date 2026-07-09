@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../database/database.provider';
 import { withRls, SessionContext } from '../../database/rls.helper';
@@ -42,7 +42,7 @@ export class LeadsRepository {
         LEFT JOIN auth.users u ON u.id = l.banker_id
         WHERE TRUE
           ${bankerFilter}
-          ${filters.stage    ? tx`AND l.stage    = ${filters.stage}`    : tx``}
+          ${filters.stage ? tx`AND l.stage = ${filters.stage}` : tx``}
           ${filters.priority ? tx`AND l.priority = ${filters.priority}` : tx``}
         ORDER BY l.updated_at DESC
         LIMIT ${filters.limit} OFFSET ${offset}
@@ -60,7 +60,7 @@ export class LeadsRepository {
         SELECT COUNT(*)::int AS count FROM crm.leads
         WHERE TRUE
           ${countBankerFilter}
-          ${filters.stage    ? tx`AND stage    = ${filters.stage}`    : tx``}
+          ${filters.stage ? tx`AND stage = ${filters.stage}` : tx``}
           ${filters.priority ? tx`AND priority = ${filters.priority}` : tx``}
       `;
 
@@ -89,6 +89,27 @@ export class LeadsRepository {
 
   async create(ctx: SessionContext, dto: CreateLeadDto) {
     return withRls(this.sql, ctx, async (tx) => {
+      // Proteção contra duplicados: compara o telefone normalizado
+      // (só dígitos, ignorando máscara e DDI) dentro do tenant.
+      if (dto.phone) {
+        const digits = dto.phone.replace(/\D/g, '');
+        if (digits.length >= 8) {
+          const [dup] = await tx`
+            SELECT id, full_name
+            FROM crm.leads
+            WHERE tenant_id = ${ctx.tenantId}
+              AND phone IS NOT NULL
+              AND right(regexp_replace(phone, '\D', '', 'g'), 11) = ${digits.slice(-11)}
+            LIMIT 1
+          `;
+          if (dup) {
+            throw new ConflictException(
+              `Já existe um lead cadastrado com este telefone: ${dup.full_name}`,
+            );
+          }
+        }
+      }
+
       // Banker sempre cria leads para si mesmo, independente do payload
       const bankerId =
         ctx.userRole === 'banker' ? ctx.userId : (dto.banker_id ?? null);
@@ -100,13 +121,13 @@ export class LeadsRepository {
         ) VALUES (
           ${ctx.tenantId},
           ${dto.full_name},
-          ${dto.email          ?? null},
-          ${dto.phone          ?? null},
+          ${dto.email ?? null},
+          ${dto.phone ?? null},
           ${bankerId},
-          ${dto.origem_tipo    ?? null},
+          ${dto.origem_tipo ?? null},
           ${dto.contexto_relacionamento ?? null},
-          ${dto.estimated_aum  ?? null},
-          ${dto.priority       ?? 'med'}
+          ${dto.estimated_aum ?? null},
+          ${dto.priority ?? 'med'}
         )
         RETURNING *
       `;
@@ -126,14 +147,14 @@ export class LeadsRepository {
       const [row] = await tx`
         UPDATE crm.leads
         SET
-          full_name               = COALESCE(${dto.full_name            ?? null}, full_name),
-          email                   = COALESCE(${dto.email                ?? null}, email),
-          phone                   = COALESCE(${dto.phone                ?? null}, phone),
-          banker_id               = COALESCE(${dto.banker_id            ?? null}::uuid, banker_id),
-          origem_tipo             = COALESCE(${dto.origem_tipo          ?? null}, origem_tipo),
+          full_name = COALESCE(${dto.full_name ?? null}, full_name),
+          email = COALESCE(${dto.email ?? null}, email),
+          phone = COALESCE(${dto.phone ?? null}, phone),
+          banker_id = COALESCE(${dto.banker_id ?? null}::uuid, banker_id),
+          origem_tipo = COALESCE(${dto.origem_tipo ?? null}, origem_tipo),
           contexto_relacionamento = COALESCE(${dto.contexto_relacionamento ?? null}, contexto_relacionamento),
-          estimated_aum           = COALESCE(${dto.estimated_aum        ?? null}, estimated_aum),
-          priority                = COALESCE(${dto.priority             ?? null}, priority)
+          estimated_aum = COALESCE(${dto.estimated_aum ?? null}, estimated_aum),
+          priority = COALESCE(${dto.priority ?? null}, priority)
         WHERE id = ${id}
           ${scope}
         RETURNING *
@@ -153,13 +174,13 @@ export class LeadsRepository {
       const [row] = await tx`
         UPDATE crm.leads
         SET
-          stage        = ${dto.stage},
-          loss_reason  = ${dto.loss_reason ?? null},
-          loss_notes   = ${dto.loss_notes  ?? null},
+          stage = ${dto.stage},
+          loss_reason = ${dto.loss_reason ?? null},
+          loss_notes = ${dto.loss_notes ?? null},
           converted_at = CASE
-                           WHEN ${dto.stage} = 'cliente_ativo' THEN NOW()
-                           ELSE converted_at
-                         END
+            WHEN ${dto.stage} = 'cliente_ativo' THEN NOW()
+            ELSE converted_at
+          END
         WHERE id = ${id}
           ${scope}
         RETURNING *
