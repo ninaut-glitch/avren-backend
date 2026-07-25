@@ -4,20 +4,14 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InteractionsService } from './interactions.service';
-import { CreateInteractionDto } from './dto/create-interaction.dto';
+import { CreateInteractionDto, UpdateInteractionDto } from './dto/create-interaction.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
-import { Inject } from '@nestjs/common';
-import { DATABASE_CLIENT } from '../../database/database.provider';
-import { Sql } from 'postgres';
 
 @ApiTags('Lead Interactions')
 @ApiBearerAuth()
 @Controller('leads/:leadId/interactions')
 export class LeadInteractionsController {
-  constructor(
-    private readonly service: InteractionsService,
-    @Inject(DATABASE_CLIENT) private readonly sql: Sql,
-  ) {}
+  constructor(private readonly service: InteractionsService) {}
 
   private ctx(user: JwtPayload, req: any) {
     return req.rlsContext ?? {
@@ -30,8 +24,8 @@ export class LeadInteractionsController {
   findAll(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('leadId', ParseUUIDPipe) leadId: string,
-    @Query('type')  type?: string,
-    @Query('page')  page  = 1,
+    @Query('type') type?: string,
+    @Query('page') page = 1,
     @Query('limit') limit = 20,
   ) {
     return this.service.findByLead(this.ctx(user, req), leadId, {
@@ -50,35 +44,24 @@ export class LeadInteractionsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Edita uma interação do lead' })
-  async update(
-    @CurrentUser() user: JwtPayload,
+  @ApiOperation({ summary: 'Edita uma interação do lead (todos os papéis)' })
+  update(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: any,
+    @Body() dto: UpdateInteractionDto,
   ) {
-    const [row] = await this.sql`
-      UPDATE wealth.interactions SET
-        subject      = COALESCE(${body.subject ?? null}, subject),
-        notes        = COALESCE(${body.notes ?? null}, notes),
-        occurred_at  = COALESCE(${body.occurred_at ? body.occurred_at + '::timestamptz' : null}::timestamptz, occurred_at),
-        duration_min = COALESCE(${body.duration_min ?? null}, duration_min)
-      WHERE id = ${id} AND lead_id = ${leadId}
-      RETURNING *
-    `;
-    return row;
+    return this.service.update(this.ctx(user, req), id, dto, { leadId });
   }
 
   @Delete(':id')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Deleta uma interação do lead' })
-  async remove(
-    @CurrentUser() user: JwtPayload,
+  @ApiOperation({ summary: 'Exclui uma interação do lead (somente sócio)' })
+  remove(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    await this.sql`
-      DELETE FROM wealth.interactions WHERE id = ${id} AND lead_id = ${leadId}
-    `;
+    return this.service.remove(this.ctx(user, req), id, { leadId });
   }
 }
