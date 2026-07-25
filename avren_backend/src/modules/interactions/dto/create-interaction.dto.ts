@@ -1,16 +1,16 @@
 import {
   IsString, IsOptional, IsUUID, IsEnum,
-  IsDateString, IsInt, Min, IsArray,
+  IsDateString, IsInt, Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum InteractionType {
-  LIGACAO   = 'ligacao',
-  WHATSAPP  = 'whatsapp',
-  REUNIAO   = 'reuniao',
-  EMAIL     = 'email',
+  LIGACAO = 'ligacao',
+  WHATSAPP = 'whatsapp',
+  REUNIAO = 'reuniao',
+  EMAIL = 'email',
   DOCUMENTO = 'documento',
-  OUTRO     = 'outro',
+  OUTRO = 'outro',
 }
 
 export class CreateInteractionDto {
@@ -46,4 +46,29 @@ export class CreateInteractionDto {
   @IsOptional()
   @IsUUID()
   lead_id?: string;
+}
+
+// Edição de interação: todos os campos opcionais.
+// `notes` aceita string vazia para limpar o campo.
+export class UpdateInteractionDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  subject?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  occurred_at?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  duration_min?: number;
 }
