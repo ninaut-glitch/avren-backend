@@ -1,11 +1,12 @@
 import {
-  Body, Controller, Get, Param, Patch,
+  Body, Controller, Delete, Get, Param, Patch,
   Post, Query, ParseUUIDPipe, Req,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { LeadsService } from './leads.service';
 import { CreateLeadDto, UpdateLeadStageDto } from './dto/create-lead.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @ApiTags('Leads')
 @ApiBearerAuth()
@@ -29,13 +30,45 @@ export class LeadsController {
     @Query('stage')     stage?: string,
     @Query('banker_id') banker_id?: string,
     @Query('priority')  priority?: string,
+    @Query('archived')  archived: 'active' | 'archived' | 'all' = 'active',
     @Query('page')      page  = 1,
     @Query('limit')     limit = 20,
   ) {
     return this.service.findAll(this.ctx(user, req), {
-      stage, banker_id, priority,
+      stage, banker_id, priority, archived,
       page: Number(page), limit: Number(limit),
     });
+  }
+
+  @Patch(':id/archive')
+  @ApiOperation({ summary: 'Arquiva um lead sem apagar seu histórico' })
+  archive(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.archive(this.ctx(user, req), id);
+  }
+
+  @Patch(':id/restore')
+  @ApiOperation({ summary: 'Restaura um lead arquivado' })
+  restore(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.restore(this.ctx(user, req), id);
+  }
+
+  @Delete(':id')
+  @Roles('socio', 'admin')
+  @ApiOperation({ summary: 'Exclui permanentemente um lead sem vínculos' })
+  remove(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.remove(this.ctx(user, req), id);
   }
 
   @Post()
