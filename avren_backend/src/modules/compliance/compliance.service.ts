@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ComplianceRepository } from './compliance.repository';
 import { SessionContext } from '../../database/rls.helper';
 
@@ -16,6 +16,15 @@ export class ComplianceService {
   }
 
   async updateStatus(ctx: SessionContext, id: string, status: string, notes?: string) {
+    const allowed = new Set(['open', 'in_progress', 'resolved', 'dismissed']);
+    if (!allowed.has(status)) {
+      throw new BadRequestException('Status de compliance inválido');
+    }
+    if ((status === 'resolved' || status === 'dismissed') && !notes?.trim()) {
+      throw new BadRequestException(
+        'Informe a evidência ou justificativa para encerrar o alerta',
+      );
+    }
     const alert = await this.repo.updateAlertStatus(ctx, id, status, notes);
     if (!alert) throw new NotFoundException(`Alerta ${id} não encontrado`);
     return alert;
