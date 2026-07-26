@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -51,5 +52,41 @@ export class LeadsService {
 
   async findHistory(ctx: SessionContext, id: string) {
     return this.repo.findHistory(ctx, id);
+  }
+
+  async archive(ctx: SessionContext, id: string) {
+    await this.findById(ctx, id);
+    const lead = await this.repo.setArchived(ctx, id, true);
+    if (!lead) throw new NotFoundException(`Lead ${id} não encontrado`);
+    return lead;
+  }
+
+  async restore(ctx: SessionContext, id: string) {
+    await this.findById(ctx, id);
+    const lead = await this.repo.setArchived(ctx, id, false);
+    if (!lead) throw new NotFoundException(`Lead ${id} não encontrado`);
+    return lead;
+  }
+
+  async remove(ctx: SessionContext, id: string) {
+    const lead = await this.findById(ctx, id);
+    if (!(lead.archivedAt ?? lead.archived_at)) {
+      throw new UnprocessableEntityException(
+        'Arquive o lead antes de excluí-lo permanentemente',
+      );
+    }
+
+    const dependencies = await this.repo.countDependencies(ctx, id);
+    const total = Object.values(dependencies).reduce((sum, count) => sum + count, 0);
+    if (total > 0) {
+      throw new ConflictException({
+        message: 'Este lead possui histórico relacionado e não pode ser excluído permanentemente',
+        dependencies,
+      });
+    }
+
+    const removed = await this.repo.remove(ctx, id);
+    if (!removed) throw new NotFoundException(`Lead ${id} não encontrado`);
+    return { deleted: true, id };
   }
 }

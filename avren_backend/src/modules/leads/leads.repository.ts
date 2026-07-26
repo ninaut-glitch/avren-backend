@@ -14,6 +14,7 @@ export class LeadsRepository {
       stage?: string;
       banker_id?: string;
       priority?: string;
+      archived?: 'active' | 'archived' | 'all';
       page: number;
       limit: number;
     },
@@ -42,6 +43,11 @@ export class LeadsRepository {
         LEFT JOIN auth.users u ON u.id = l.banker_id
         WHERE TRUE
           ${bankerFilter}
+          ${filters.archived === 'all'
+            ? tx``
+            : filters.archived === 'archived'
+              ? tx`AND l.archived_at IS NOT NULL`
+              : tx`AND l.archived_at IS NULL`}
           ${filters.stage ? tx`AND l.stage = ${filters.stage}` : tx``}
           ${filters.priority ? tx`AND l.priority = ${filters.priority}` : tx``}
         ORDER BY l.updated_at DESC
@@ -60,6 +66,11 @@ export class LeadsRepository {
         SELECT COUNT(*)::int AS count FROM crm.leads
         WHERE TRUE
           ${countBankerFilter}
+          ${filters.archived === 'all'
+            ? tx``
+            : filters.archived === 'archived'
+              ? tx`AND archived_at IS NOT NULL`
+              : tx`AND archived_at IS NULL`}
           ${filters.stage ? tx`AND stage = ${filters.stage}` : tx``}
           ${filters.priority ? tx`AND priority = ${filters.priority}` : tx``}
       `;
@@ -201,6 +212,52 @@ export class LeadsRepository {
         WHERE h.lead_id = ${leadId}
         ORDER BY h.changed_at DESC
       `;
+    });
+  }
+
+  async setArchived(ctx: SessionContext, id: string, archived: boolean) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const scope =
+        ctx.userRole === 'banker'
+          ? tx`AND banker_id = ${ctx.userId}`
+          : tx``;
+      const [row] = await tx`
+        UPDATE crm.leads
+        SET
+          archived_at = ${archived ? new Date() : null},
+          archived_by = ${archived ? ctx.userId : null}::uuid
+        WHERE id = ${id}
+          ${scope}
+        RETURNING *
+      `;
+      return row ?? null;
+    });
+  }
+
+  async countDependencies(ctx: SessionContext, id: string) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const [row] = await tx`
+        SELECT
+          (SELECT COUNT(*)::int FROM wealth.clients WHERE lead_id = ${id}) AS clients,
+          (SELECT COUNT(*)::int FROM wealth.interactions WHERE lead_id = ${id}) AS interactions,
+          (SELECT COUNT(*)::int FROM crm.tasks WHERE lead_id = ${id}) AS tasks,
+          (SELECT COUNT(*)::int FROM crm.reminders WHERE lead_id = ${id}) AS reminders,
+          (SELECT COUNT(*)::int FROM crm.visits WHERE lead_id = ${id}) AS visits,
+          (SELECT COUNT(*)::int FROM community.event_participants WHERE lead_id = ${id}) AS events
+      `;
+      return row as Record<string, number>;
+    });
+  }
+
+  async remove(ctx: SessionContext, id: string) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const [row] = await tx`
+        DELETE FROM crm.leads
+        WHERE id = ${id}
+          AND archived_at IS NOT NULL
+        RETURNING id
+      `;
+      return row ?? null;
     });
   }
 }
