@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common'
 import { OpportunitiesService } from './opportunities.service'
+import { UpdateConvictionDto } from './dto/update-conviction.dto'
 
 @Controller('opportunities')
 export class OpportunitiesController {
@@ -20,6 +21,7 @@ export class OpportunitiesController {
     return this.svc.findAll(req.rlsContext, {
       status: query.status,
       type: query.type,
+      conviction: query.conviction,
       page: Number(query.page ?? 1),
       limit: Number(query.limit ?? 20),
     })
@@ -62,6 +64,15 @@ export class OpportunitiesController {
   @Patch(':id')
   update(@Request() req: any, @Param('id') id: string, @Body() dto: any) {
     return this.svc.update(req.rlsContext, id, dto)
+  }
+
+  @Patch(':id/conviction')
+  updateConviction(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateConvictionDto,
+  ) {
+    return this.svc.updateConviction(req.rlsContext, id, dto.conviction)
   }
 }
 

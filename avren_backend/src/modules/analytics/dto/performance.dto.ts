@@ -17,6 +17,12 @@ export class UpsertGoalDto {
   @IsOptional() @IsNumber() @Min(0)
   visits_goal?: number
 
+  @IsOptional() @IsNumber() @Min(0)
+  hot_pipe_goal?: number
+
+  @IsOptional() @IsNumber() @Min(0)
+  pipe_dream_goal?: number
+
   @IsOptional() @IsNumber() @Min(1)
   pipeline_multiplier?: number
 
