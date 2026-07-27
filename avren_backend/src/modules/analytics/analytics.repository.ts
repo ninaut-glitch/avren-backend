@@ -180,6 +180,8 @@ export class AnalyticsRepository {
         SELECT
           u.id, u.full_name, u.role,
           g.id AS goal_id, g.captacao_goal, g.revenue_goal, g.visits_goal,
+          COALESCE(g.hot_pipe_goal, 0)::int AS hot_pipe_goal,
+          COALESCE(g.pipe_dream_goal, 0)::int AS pipe_dream_goal,
           COALESCE(g.pipeline_multiplier, 3) AS pipeline_multiplier,
           COALESCE(g.visit_to_hot_rate, 50) AS visit_to_hot_rate,
           g.average_ticket, COALESCE(g.excluded_dates, '{}') AS excluded_dates,
@@ -193,7 +195,8 @@ export class AnalyticsRepository {
           COALESCE(op.projected_one_time_revenue, 0) AS projected_one_time_revenue,
           COALESCE(rv.monthly_revenue, 0) AS monthly_revenue,
           COALESCE(v.visits_done, 0)::int AS visits_done,
-          COALESCE(pd.pipe_dream_count, 0)::int AS pipe_dream_count,
+          COALESCE(cv.hot_pipe_count, 0)::int AS hot_pipe_count,
+          COALESCE(cv.pipe_dream_count, 0)::int AS pipe_dream_count,
           COALESCE(pd.pipe_dream_potential, 0) AS pipe_dream_potential
         FROM auth.users u
         LEFT JOIN analytics.banker_goals g
@@ -234,8 +237,17 @@ export class AnalyticsRepository {
             AND i.occurred_at < ${end.toISOString()}::timestamptz
         ) v ON TRUE
         LEFT JOIN LATERAL (
-          SELECT COUNT(*) AS pipe_dream_count,
-                 COALESCE(SUM(p.potential_capture), 0) AS pipe_dream_potential
+          SELECT
+            COUNT(*) FILTER (WHERE o.conviction = 'quente') AS hot_pipe_count,
+            COUNT(*) FILTER (WHERE o.conviction = 'dream') AS pipe_dream_count
+          FROM wealth.opportunities o
+          WHERE o.tenant_id = ${ctx.tenantId}
+            AND o.banker_id = u.id
+            AND o.conviction_set_at >= ${start.toISOString()}::timestamptz
+            AND o.conviction_set_at < ${end.toISOString()}::timestamptz
+        ) cv ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(SUM(p.potential_capture), 0) AS pipe_dream_potential
           FROM crm.pipe_dreams p
           WHERE p.tenant_id = ${ctx.tenantId} AND p.owner_id = u.id
             AND p.converted_at IS NULL
@@ -359,12 +371,14 @@ export class AnalyticsRepository {
       const [goal] = await tx`
         INSERT INTO analytics.banker_goals (
           tenant_id, banker_id, goal_month, captacao_goal, revenue_goal,
-          visits_goal, pipeline_multiplier, visit_to_hot_rate, average_ticket,
+          visits_goal, hot_pipe_goal, pipe_dream_goal,
+          pipeline_multiplier, visit_to_hot_rate, average_ticket,
           excluded_dates, status, published_at, published_by
         ) VALUES (
           ${ctx.tenantId}, ${participantId}, ${month}::date,
           ${dto.captacao_goal ?? null}, ${dto.revenue_goal ?? null},
-          ${dto.visits_goal ?? null}, ${dto.pipeline_multiplier ?? 3},
+          ${dto.visits_goal ?? null}, ${dto.hot_pipe_goal ?? 0},
+          ${dto.pipe_dream_goal ?? 0}, ${dto.pipeline_multiplier ?? 3},
           ${dto.visit_to_hot_rate ?? 50}, ${dto.average_ticket ?? null},
           ${dto.excluded_dates ?? []}::date[], ${dto.status ?? 'draft'},
           ${dto.status === 'published' ? new Date().toISOString() : null}::timestamptz,
@@ -374,6 +388,8 @@ export class AnalyticsRepository {
           captacao_goal = EXCLUDED.captacao_goal,
           revenue_goal = EXCLUDED.revenue_goal,
           visits_goal = EXCLUDED.visits_goal,
+          hot_pipe_goal = EXCLUDED.hot_pipe_goal,
+          pipe_dream_goal = EXCLUDED.pipe_dream_goal,
           pipeline_multiplier = EXCLUDED.pipeline_multiplier,
           visit_to_hot_rate = EXCLUDED.visit_to_hot_rate,
           average_ticket = EXCLUDED.average_ticket,

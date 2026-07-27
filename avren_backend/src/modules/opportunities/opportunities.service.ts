@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { OpportunitiesRepository } from './opportunities.repository';
 import { CreateOpportunityDto, UpdateOpportunityDto } from './dto/create-opportunity.dto';
 import { SessionContext } from '../../database/rls.helper';
@@ -8,6 +8,9 @@ export class OpportunitiesService {
   constructor(private readonly repo: OpportunitiesRepository) {}
 
   async findAll(ctx: SessionContext, filters: any) {
+    if (filters.conviction && !['quente', 'dream', 'none'].includes(filters.conviction)) {
+      throw new BadRequestException('Filtro de convicção inválido');
+    }
     const { data, total } = await this.repo.findAll(ctx, filters);
     return {
       data,
@@ -53,6 +56,17 @@ export class OpportunitiesService {
   async update(ctx: SessionContext, id: string, dto: UpdateOpportunityDto) {
     await this.findById(ctx, id);
     const row = await this.repo.update(ctx, id, dto);
+    if (!row) throw new NotFoundException(`Oportunidade ${id} não encontrada`);
+    return row;
+  }
+
+  async updateConviction(
+    ctx: SessionContext,
+    id: string,
+    conviction: 'quente' | 'dream' | null,
+  ) {
+    await this.findById(ctx, id);
+    const row = await this.repo.updateConviction(ctx, id, conviction);
     if (!row) throw new NotFoundException(`Oportunidade ${id} não encontrada`);
     return row;
   }

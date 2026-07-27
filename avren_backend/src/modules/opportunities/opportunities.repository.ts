@@ -9,7 +9,7 @@ export class OpportunitiesRepository {
   constructor(@Inject(DATABASE_CLIENT) private readonly sql: Sql) {}
 
   async findAll(ctx: SessionContext, filters: {
-    type?: string; status?: string; page: number; limit: number;
+    type?: string; status?: string; conviction?: string; page: number; limit: number;
   }) {
     return withRls(this.sql, ctx, async (tx) => {
       const offset = (filters.page - 1) * filters.limit;
@@ -24,6 +24,11 @@ export class OpportunitiesRepository {
         WHERE 1 = 1
           ${filters.type ? tx`AND o.type = ${filters.type}` : tx``}
           ${filters.status ? tx`AND o.status = ${filters.status}` : tx``}
+          ${filters.conviction === 'none'
+            ? tx`AND o.conviction IS NULL`
+            : filters.conviction
+              ? tx`AND o.conviction = ${filters.conviction}`
+              : tx``}
         ORDER BY o.updated_at DESC
         LIMIT ${filters.limit} OFFSET ${offset}
       `;
@@ -32,6 +37,11 @@ export class OpportunitiesRepository {
         WHERE 1 = 1
           ${filters.type ? tx`AND o.type = ${filters.type}` : tx``}
           ${filters.status ? tx`AND o.status = ${filters.status}` : tx``}
+          ${filters.conviction === 'none'
+            ? tx`AND o.conviction IS NULL`
+            : filters.conviction
+              ? tx`AND o.conviction = ${filters.conviction}`
+              : tx``}
       `;
       return { data: rows, total: count };
     });
@@ -157,6 +167,33 @@ export class OpportunitiesRepository {
         WHERE id = ${id}
         RETURNING *
       `;
+      return row ?? null;
+    });
+  }
+
+  async updateConviction(
+    ctx: SessionContext,
+    id: string,
+    conviction: 'quente' | 'dream' | null,
+  ) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const [row] = conviction === null
+        ? await tx`
+            UPDATE wealth.opportunities SET
+              conviction = NULL,
+              conviction_set_at = NULL,
+              conviction_set_by = NULL
+            WHERE id = ${id}
+            RETURNING *
+          `
+        : await tx`
+            UPDATE wealth.opportunities SET
+              conviction = ${conviction},
+              conviction_set_at = NOW(),
+              conviction_set_by = ${ctx.userId}
+            WHERE id = ${id}
+            RETURNING *
+          `;
       return row ?? null;
     });
   }
