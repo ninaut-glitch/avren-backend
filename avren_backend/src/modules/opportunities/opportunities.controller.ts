@@ -15,6 +15,22 @@ import { OpportunitiesService } from './opportunities.service'
 export class OpportunitiesController {
   constructor(private readonly svc: OpportunitiesService) {}
 
+  @Get()
+  findAll(@Request() req: any, @Query() query: any) {
+    return this.svc.findAll(req.rlsContext, {
+      status: query.status,
+      type: query.type,
+      page: Number(query.page ?? 1),
+      limit: Number(query.limit ?? 20),
+    })
+  }
+
+  @Post()
+  createForSubject(@Request() req: any, @Body() body: any) {
+    const { client_id, lead_id, ...dto } = body
+    return this.svc.createForSubject(req.rlsContext, { client_id, lead_id }, dto)
+  }
+
   @Get('client/:clientId')
   findByClient(
     @Request() req: any,
