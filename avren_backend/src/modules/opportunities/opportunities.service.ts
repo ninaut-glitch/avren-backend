@@ -7,6 +7,17 @@ import { SessionContext } from '../../database/rls.helper';
 export class OpportunitiesService {
   constructor(private readonly repo: OpportunitiesRepository) {}
 
+  async findAll(ctx: SessionContext, filters: any) {
+    const { data, total } = await this.repo.findAll(ctx, filters);
+    return {
+      data,
+      pagination: {
+        page: filters.page, limit: filters.limit,
+        total, totalPages: Math.ceil(total / filters.limit),
+      },
+    };
+  }
+
   async findByClient(ctx: SessionContext, clientId: string, filters: any) {
     const { data, total } = await this.repo.findByClient(ctx, clientId, filters);
     return {
@@ -26,6 +37,17 @@ export class OpportunitiesService {
 
   async create(ctx: SessionContext, clientId: string, dto: CreateOpportunityDto) {
     return this.repo.create(ctx, clientId, dto);
+  }
+
+  async createForSubject(
+    ctx: SessionContext,
+    subject: { client_id?: string; lead_id?: string },
+    dto: CreateOpportunityDto,
+  ) {
+    if ((!subject.client_id && !subject.lead_id) || (subject.client_id && subject.lead_id)) {
+      throw new NotFoundException('Informe um cliente ou lead');
+    }
+    return this.repo.createForSubject(ctx, subject, dto);
   }
 
   async update(ctx: SessionContext, id: string, dto: UpdateOpportunityDto) {

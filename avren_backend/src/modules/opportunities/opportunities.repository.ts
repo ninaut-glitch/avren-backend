@@ -8,6 +8,35 @@ import { CreateOpportunityDto, UpdateOpportunityDto } from './dto/create-opportu
 export class OpportunitiesRepository {
   constructor(@Inject(DATABASE_CLIENT) private readonly sql: Sql) {}
 
+  async findAll(ctx: SessionContext, filters: {
+    type?: string; status?: string; page: number; limit: number;
+  }) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const offset = (filters.page - 1) * filters.limit;
+      const rows = await tx`
+        SELECT o.*, u.full_name AS banker_name,
+               COALESCE(c.full_name, l.full_name) AS client_name,
+               CASE WHEN o.client_id IS NOT NULL THEN 'client' ELSE 'lead' END AS subject_type
+        FROM wealth.opportunities o
+        JOIN auth.users u ON u.id = o.banker_id
+        LEFT JOIN wealth.clients c ON c.id = o.client_id
+        LEFT JOIN crm.leads l ON l.id = o.lead_id
+        WHERE 1 = 1
+          ${filters.type ? tx`AND o.type = ${filters.type}` : tx``}
+          ${filters.status ? tx`AND o.status = ${filters.status}` : tx``}
+        ORDER BY o.updated_at DESC
+        LIMIT ${filters.limit} OFFSET ${offset}
+      `;
+      const [{ count }] = await tx`
+        SELECT COUNT(*)::int AS count FROM wealth.opportunities o
+        WHERE 1 = 1
+          ${filters.type ? tx`AND o.type = ${filters.type}` : tx``}
+          ${filters.status ? tx`AND o.status = ${filters.status}` : tx``}
+      `;
+      return { data: rows, total: count };
+    });
+  }
+
   async findByClient(ctx: SessionContext, clientId: string, filters: {
     status?: string; page: number; limit: number;
   }) {
@@ -38,13 +67,38 @@ export class OpportunitiesRepository {
   async findById(ctx: SessionContext, id: string) {
     return withRls(this.sql, ctx, async (tx) => {
       const [row] = await tx`
-        SELECT o.*, u.full_name AS banker_name, c.full_name AS client_name
+        SELECT o.*, u.full_name AS banker_name,
+               COALESCE(c.full_name, l.full_name) AS client_name,
+               CASE WHEN o.client_id IS NOT NULL THEN 'client' ELSE 'lead' END AS subject_type
         FROM wealth.opportunities o
         JOIN auth.users    u ON u.id = o.banker_id
-        JOIN wealth.clients c ON c.id = o.client_id
+        LEFT JOIN wealth.clients c ON c.id = o.client_id
+        LEFT JOIN crm.leads l ON l.id = o.lead_id
         WHERE o.id = ${id}
       `;
       return row ?? null;
+    });
+  }
+
+  async createForSubject(
+    ctx: SessionContext,
+    subject: { client_id?: string; lead_id?: string },
+    dto: CreateOpportunityDto,
+  ) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const [row] = await tx`
+        INSERT INTO wealth.opportunities (
+          tenant_id, client_id, lead_id, banker_id, type, title,
+          estimated_value, probability, expected_close_date, notes
+        ) VALUES (
+          ${ctx.tenantId}, ${subject.client_id ?? null}, ${subject.lead_id ?? null},
+          ${ctx.userId}, ${dto.type}, ${dto.title ?? null},
+          ${dto.estimated_value ?? null}, ${dto.probability ?? null},
+          ${dto.expected_close_date ?? null}::date, ${dto.notes ?? null}
+        )
+        RETURNING *
+      `;
+      return row;
     });
   }
 
