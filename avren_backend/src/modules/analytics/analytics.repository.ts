@@ -164,6 +164,15 @@ export class AnalyticsRepository {
     return total
   }
 
+  private toSnakeCaseRecord(row: Record<string, unknown>) {
+    return Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [
+        key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+        value,
+      ]),
+    )
+  }
+
   async getTeamPerformance(ctx: SessionContext, month?: string) {
     return withRls(this.sql, ctx, async (tx) => {
       const { start, end } = this.getMonthBounds(month)
@@ -319,7 +328,7 @@ export class AnalyticsRepository {
           const visitsGoal = Number(p.visitsGoal ?? 0)
             || Math.ceil((pipelineTarget / Math.max(averageTicket, 1)) / (Number(p.visitToHotRate) / 100))
           return {
-            ...p,
+            ...this.toSnakeCaseRecord(p),
             total_business_days: totalBusinessDays,
             elapsed_business_days: elapsedBusinessDays,
             remaining_business_days: remainingBusinessDays,
@@ -330,10 +339,10 @@ export class AnalyticsRepository {
               : 0,
           }
         }),
-        pipe_dreams: pipeDreams,
-        hot_opportunities: hotOpportunities,
-        pipeline_candidates: pipelineCandidates,
-        revenue_sources: revenueSources,
+        pipe_dreams: pipeDreams.map((row: any) => this.toSnakeCaseRecord(row)),
+        hot_opportunities: hotOpportunities.map((row: any) => this.toSnakeCaseRecord(row)),
+        pipeline_candidates: pipelineCandidates.map((row: any) => this.toSnakeCaseRecord(row)),
+        revenue_sources: revenueSources.map((row: any) => this.toSnakeCaseRecord(row)),
       }
     })
   }
