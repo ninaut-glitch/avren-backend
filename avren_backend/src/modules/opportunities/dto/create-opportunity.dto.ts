@@ -12,6 +12,10 @@ export enum OpportunityType {
   CREDITO       = 'credito',
   MA            = 'ma',
   CORPORATE     = 'corporate',
+  CONSORCIO     = 'consorcio',
+  FINANCIAMENTO = 'financiamento',
+  PLANEJAMENTO_PATRIMONIAL = 'planejamento_patrimonial',
+  SEGURO_VIDA   = 'seguro_vida',
 }
 
 export enum OpportunityStatus {
