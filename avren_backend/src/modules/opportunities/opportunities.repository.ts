@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../database/database.provider';
 import { withRls, SessionContext } from '../../database/rls.helper';
@@ -86,6 +86,19 @@ export class OpportunitiesRepository {
     dto: CreateOpportunityDto,
   ) {
     return withRls(this.sql, ctx, async (tx) => {
+      const bankerId = ctx.userRole === 'banker'
+        ? ctx.userId
+        : (dto.banker_id ?? ctx.userId);
+      const [owner] = await tx`
+        SELECT id FROM auth.users
+        WHERE id = ${bankerId}
+          AND tenant_id = ${ctx.tenantId}
+          AND is_active = TRUE
+          AND role IN ('banker','socio','supervisor')
+      `;
+      if (!owner) {
+        throw new BadRequestException('Responsável inválido para esta oportunidade');
+      }
       const [row] = await tx`
         INSERT INTO wealth.opportunities (
           tenant_id, client_id, lead_id, banker_id, type, title,
@@ -93,7 +106,7 @@ export class OpportunitiesRepository {
           probability, expected_close_date, notes
         ) VALUES (
           ${ctx.tenantId}, ${subject.client_id ?? null}, ${subject.lead_id ?? null},
-          ${ctx.userId}, ${dto.type}, ${dto.title ?? null},
+          ${bankerId}, ${dto.type}, ${dto.title ?? null},
           ${dto.estimated_value ?? null}, ${dto.estimated_monthly_revenue ?? null},
           ${dto.estimated_one_time_revenue ?? null}, ${dto.probability ?? null},
           ${dto.expected_close_date ?? null}::date, ${dto.notes ?? null}

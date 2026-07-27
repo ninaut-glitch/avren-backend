@@ -1,6 +1,7 @@
 import {
   IsString, IsOptional, IsEnum,
   IsNumber, IsDateString, Min, Max,
+  IsUUID,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -27,6 +28,11 @@ export enum OpportunityStatus {
 }
 
 export class CreateOpportunityDto {
+  @ApiPropertyOptional({ description: 'Responsável pela oportunidade; restrito a perfis de gestão' })
+  @IsOptional()
+  @IsUUID()
+  banker_id?: string;
+
   @ApiProperty({ enum: OpportunityType })
   @IsEnum(OpportunityType)
   type: OpportunityType;
