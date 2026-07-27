@@ -200,6 +200,37 @@ export class LeadsRepository {
     });
   }
 
+  async updateConviction(
+    ctx: SessionContext,
+    id: string,
+    conviction: 'quente' | 'dream' | null,
+  ) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const scope =
+        ctx.userRole === 'banker'
+          ? tx`AND banker_id = ${ctx.userId}`
+          : tx``;
+      const [row] = conviction === null
+        ? await tx`
+            UPDATE crm.leads SET
+              conviction = NULL,
+              conviction_set_at = NULL,
+              conviction_set_by = NULL
+            WHERE id = ${id} ${scope}
+            RETURNING *
+          `
+        : await tx`
+            UPDATE crm.leads SET
+              conviction = ${conviction},
+              conviction_set_at = NOW(),
+              conviction_set_by = ${ctx.userId}
+            WHERE id = ${id} ${scope}
+            RETURNING *
+          `;
+      return row ?? null;
+    });
+  }
+
   async findHistory(ctx: SessionContext, leadId: string) {
     return withRls(this.sql, ctx, async (tx) => {
       return tx`

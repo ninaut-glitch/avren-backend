@@ -50,6 +50,19 @@ export class LeadsService {
     return lead;
   }
 
+  async updateConviction(
+    ctx: SessionContext,
+    id: string,
+    conviction: 'quente' | 'dream' | null,
+  ) {
+    if (conviction !== null && !['quente', 'dream'].includes(conviction)) {
+      throw new UnprocessableEntityException('Classificação de pipe inválida');
+    }
+    const lead = await this.repo.updateConviction(ctx, id, conviction);
+    if (!lead) throw new NotFoundException(`Lead ${id} não encontrado`);
+    return lead;
+  }
+
   async findHistory(ctx: SessionContext, id: string) {
     return this.repo.findHistory(ctx, id);
   }

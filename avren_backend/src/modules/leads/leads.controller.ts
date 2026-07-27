@@ -114,6 +114,17 @@ export class LeadsController {
     return this.service.updateStage(this.ctx(user, req), id, dto);
   }
 
+  @Patch(':id/conviction')
+  @ApiOperation({ summary: 'Marca o lead como pipe quente ou pipe dream' })
+  updateConviction(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { conviction: 'quente' | 'dream' | null },
+  ) {
+    return this.service.updateConviction(this.ctx(user, req), id, body.conviction);
+  }
+
   @Get(':id/history')
   @ApiOperation({ summary: 'Histórico de stages do lead' })
   history(
