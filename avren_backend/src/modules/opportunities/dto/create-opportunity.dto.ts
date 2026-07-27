@@ -42,6 +42,18 @@ export class CreateOpportunityDto {
   @Min(0)
   estimated_value?: number;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  estimated_monthly_revenue?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  estimated_one_time_revenue?: number;
+
   @ApiPropertyOptional({ minimum: 0, maximum: 100 })
   @IsOptional()
   @IsNumber()

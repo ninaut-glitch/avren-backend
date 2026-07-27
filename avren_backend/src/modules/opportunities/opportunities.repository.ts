@@ -89,11 +89,13 @@ export class OpportunitiesRepository {
       const [row] = await tx`
         INSERT INTO wealth.opportunities (
           tenant_id, client_id, lead_id, banker_id, type, title,
-          estimated_value, probability, expected_close_date, notes
+          estimated_value, estimated_monthly_revenue, estimated_one_time_revenue,
+          probability, expected_close_date, notes
         ) VALUES (
           ${ctx.tenantId}, ${subject.client_id ?? null}, ${subject.lead_id ?? null},
           ${ctx.userId}, ${dto.type}, ${dto.title ?? null},
-          ${dto.estimated_value ?? null}, ${dto.probability ?? null},
+          ${dto.estimated_value ?? null}, ${dto.estimated_monthly_revenue ?? null},
+          ${dto.estimated_one_time_revenue ?? null}, ${dto.probability ?? null},
           ${dto.expected_close_date ?? null}::date, ${dto.notes ?? null}
         )
         RETURNING *
@@ -107,12 +109,15 @@ export class OpportunitiesRepository {
       const [row] = await tx`
         INSERT INTO wealth.opportunities (
           tenant_id, client_id, banker_id, type, title,
-          estimated_value, probability, expected_close_date, notes
+          estimated_value, estimated_monthly_revenue, estimated_one_time_revenue,
+          probability, expected_close_date, notes
         ) VALUES (
           ${ctx.tenantId}, ${clientId}, ${ctx.userId},
           ${dto.type},
           ${dto.title                ?? null},
           ${dto.estimated_value      ?? null},
+          ${dto.estimated_monthly_revenue ?? null},
+          ${dto.estimated_one_time_revenue ?? null},
           ${dto.probability          ?? null},
           ${dto.expected_close_date  ?? null}::date,
           ${dto.notes                ?? null}
@@ -130,6 +135,8 @@ export class OpportunitiesRepository {
           type                = COALESCE(${dto.type               ?? null}, type),
           title               = COALESCE(${dto.title              ?? null}, title),
           estimated_value     = COALESCE(${dto.estimated_value    ?? null}, estimated_value),
+          estimated_monthly_revenue = COALESCE(${dto.estimated_monthly_revenue ?? null}, estimated_monthly_revenue),
+          estimated_one_time_revenue = COALESCE(${dto.estimated_one_time_revenue ?? null}, estimated_one_time_revenue),
           probability         = COALESCE(${dto.probability        ?? null}, probability),
           expected_close_date = COALESCE(${dto.expected_close_date ?? null}::date, expected_close_date),
           status              = COALESCE(${dto.status             ?? null}, status),
