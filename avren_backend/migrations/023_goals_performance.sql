@@ -107,8 +107,8 @@ CREATE POLICY pipe_dream_policy ON crm.pipe_dreams
     )
   );
 
-GRANT SELECT ON analytics.banker_goals, analytics.goal_history, crm.pipe_dreams
-  TO avren_banker, avren_readonly;
-GRANT INSERT, UPDATE ON crm.pipe_dreams TO avren_banker;
-GRANT INSERT, UPDATE ON analytics.banker_goals, analytics.goal_history
-  TO avren_service;
+GRANT SELECT, INSERT, UPDATE ON
+  analytics.banker_goals,
+  analytics.goal_history,
+  crm.pipe_dreams
+TO avren_service;
