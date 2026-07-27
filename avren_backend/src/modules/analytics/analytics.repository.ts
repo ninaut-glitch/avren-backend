@@ -238,13 +238,13 @@ export class AnalyticsRepository {
         ) v ON TRUE
         LEFT JOIN LATERAL (
           SELECT
-            COUNT(*) FILTER (WHERE o.conviction = 'quente') AS hot_pipe_count,
-            COUNT(*) FILTER (WHERE o.conviction = 'dream') AS pipe_dream_count
-          FROM wealth.opportunities o
-          WHERE o.tenant_id = ${ctx.tenantId}
-            AND o.banker_id = u.id
-            AND o.conviction_set_at >= ${start.toISOString()}::timestamptz
-            AND o.conviction_set_at < ${end.toISOString()}::timestamptz
+            COUNT(*) FILTER (WHERE l.conviction = 'quente') AS hot_pipe_count,
+            COUNT(*) FILTER (WHERE l.conviction = 'dream') AS pipe_dream_count
+          FROM crm.leads l
+          WHERE l.tenant_id = ${ctx.tenantId}
+            AND l.banker_id = u.id
+            AND l.conviction_set_at >= ${start.toISOString()}::timestamptz
+            AND l.conviction_set_at < ${end.toISOString()}::timestamptz
         ) cv ON TRUE
         LEFT JOIN LATERAL (
           SELECT COALESCE(SUM(p.potential_capture), 0) AS pipe_dream_potential
