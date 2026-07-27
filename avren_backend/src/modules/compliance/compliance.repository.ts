@@ -50,12 +50,42 @@ export class ComplianceRepository {
     notes?: string,
   ) {
     return withRls(this.sql, ctx, async (tx) => {
+      const [current] = await tx`
+        SELECT id, status
+        FROM compliance.alerts
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+      if (!current) return null;
+
       const [row] = await tx`
         UPDATE compliance.alerts
-        SET status = ${status}
+        SET
+          status = ${status},
+          resolved_by = CASE
+            WHEN ${status} IN ('resolved', 'dismissed') THEN ${ctx.userId}::uuid
+            ELSE resolved_by
+          END
         WHERE id = ${id}
         RETURNING *
       `;
+
+      if (current.status !== status) {
+        await tx`
+          UPDATE compliance.alert_history
+          SET changed_by = ${ctx.userId}::uuid,
+              notes = ${notes ?? null}
+          WHERE id = (
+            SELECT id
+            FROM compliance.alert_history
+            WHERE alert_id = ${id}
+              AND from_status = ${current.status}
+              AND to_status = ${status}
+            ORDER BY changed_at DESC
+            LIMIT 1
+          )
+        `;
+      }
       return row ?? null;
     });
   }
