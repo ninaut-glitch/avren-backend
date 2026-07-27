@@ -9,9 +9,13 @@ export class PatrimonialPlanningService {
 
   list(ctx: SessionContext) {
     return withRls(this.sql, ctx, (tx) => tx`
-      SELECT p.*, c.full_name AS client_name, u.full_name AS advisor_name
+      SELECT p.*, c.full_name AS client_name, l.full_name AS lead_name,
+             COALESCE(c.full_name, l.full_name) AS subject_name,
+             CASE WHEN p.client_id IS NOT NULL THEN 'client' ELSE 'lead' END AS subject_type,
+             u.full_name AS advisor_name
       FROM wealth.patrimonial_plans p
-      JOIN wealth.clients c ON c.id = p.client_id
+      LEFT JOIN wealth.clients c ON c.id = p.client_id
+      LEFT JOIN crm.leads l ON l.id = p.lead_id
       JOIN auth.users u ON u.id = p.advisor_id
       ORDER BY p.updated_at DESC
     `);
@@ -30,22 +34,49 @@ export class PatrimonialPlanningService {
     });
   }
 
-  create(ctx: SessionContext, clientId: string) {
+  findByLead(ctx: SessionContext, leadId: string) {
     return withRls(this.sql, ctx, async (tx) => {
-      const [client] = await tx`
-        SELECT id FROM wealth.clients WHERE id = ${clientId}
+      const [row] = await tx`
+        SELECT p.*, l.full_name AS lead_name, l.full_name AS subject_name,
+               'lead' AS subject_type, u.full_name AS advisor_name
+        FROM wealth.patrimonial_plans p
+        JOIN crm.leads l ON l.id = p.lead_id
+        JOIN auth.users u ON u.id = p.advisor_id
+        WHERE p.lead_id = ${leadId}
       `;
-      if (!client) throw new NotFoundException('Cliente não encontrado');
+      return row ?? null;
+    });
+  }
+
+  create(ctx: SessionContext, body: { client_id?: string; lead_id?: string }) {
+    return withRls(this.sql, ctx, async (tx) => {
+      const clientId = body.client_id ?? null;
+      const leadId = body.lead_id ?? null;
+      if ((!clientId && !leadId) || (clientId && leadId)) {
+        throw new NotFoundException('Informe um cliente ou lead');
+      }
+
+      if (clientId) {
+        const [client] = await tx`SELECT id FROM wealth.clients WHERE id = ${clientId}`;
+        if (!client) throw new NotFoundException('Cliente não encontrado');
+      } else {
+        const [lead] = await tx`SELECT id FROM crm.leads WHERE id = ${leadId}`;
+        if (!lead) throw new NotFoundException('Lead não encontrado');
+      }
 
       const [row] = await tx`
         INSERT INTO wealth.patrimonial_plans (
-          tenant_id, client_id, advisor_id
-        ) VALUES (${ctx.tenantId}, ${clientId}, ${ctx.userId})
-        ON CONFLICT (tenant_id, client_id)
-        DO UPDATE SET updated_at = wealth.patrimonial_plans.updated_at
+          tenant_id, client_id, lead_id, advisor_id
+        ) VALUES (${ctx.tenantId}, ${clientId}, ${leadId}, ${ctx.userId})
+        ON CONFLICT DO NOTHING
         RETURNING *
       `;
-      return row;
+      if (row) return row;
+
+      const [existing] = clientId
+        ? await tx`SELECT * FROM wealth.patrimonial_plans WHERE client_id = ${clientId}`
+        : await tx`SELECT * FROM wealth.patrimonial_plans WHERE lead_id = ${leadId}`;
+      return existing;
     });
   }
 

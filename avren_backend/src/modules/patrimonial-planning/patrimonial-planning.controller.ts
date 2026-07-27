@@ -30,13 +30,22 @@ export class PatrimonialPlanningController {
     return this.service.findByClient(this.ctx(user, req), clientId);
   }
 
+  @Get('lead/:leadId')
+  @ApiOperation({ summary: 'Busca o dossiê atual do lead' })
+  findByLead(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('leadId') leadId: string,
+  ) {
+    return this.service.findByLead(this.ctx(user, req), leadId);
+  }
+
   @Post()
-  @ApiOperation({ summary: 'Inicia ou retorna o dossiê de um cliente' })
+  @ApiOperation({ summary: 'Inicia ou retorna o dossiê de um cliente ou lead' })
   create(
     @CurrentUser() user: JwtPayload, @Req() req: any,
-    @Body() body: { client_id: string },
+    @Body() body: { client_id?: string; lead_id?: string },
   ) {
-    return this.service.create(this.ctx(user, req), body.client_id);
+    return this.service.create(this.ctx(user, req), body);
   }
 
   @Patch(':id')
