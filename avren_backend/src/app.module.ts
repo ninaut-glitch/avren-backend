@@ -16,6 +16,7 @@ import { AiModule }            from './modules/ai/ai.module';
 import { RemindersModule }     from './modules/reminders/reminders.module';
 import { VisitsModule }        from './modules/visits/visits.module';
 import { XpIntegrationModule } from './modules/integrations/xp/xp-integration.module';
+import { PatrimonialPlanningModule } from './modules/patrimonial-planning/patrimonial-planning.module';
 import { JwtAuthGuard }          from './common/guards/jwt.guard';
 import { RolesGuard }            from './common/guards/roles.guard';
 import { RlsInterceptor }        from './common/interceptors/rls.interceptor';
@@ -43,6 +44,7 @@ import { globalValidationPipe }  from './common/pipes/validation.pipe';
     RemindersModule,
     VisitsModule,
     XpIntegrationModule,
+    PatrimonialPlanningModule,
   ],
   providers: [
     { provide: APP_GUARD,       useClass: ThrottlerGuard },
