@@ -191,6 +191,18 @@ export class LeadsRepository {
           converted_at = CASE
             WHEN ${dto.stage} = 'cliente_ativo' THEN NOW()
             ELSE converted_at
+          END,
+          conviction = CASE
+            WHEN ${dto.stage} = 'cliente_ativo' THEN NULL
+            ELSE conviction
+          END,
+          conviction_set_at = CASE
+            WHEN ${dto.stage} = 'cliente_ativo' THEN NULL
+            ELSE conviction_set_at
+          END,
+          conviction_set_by = CASE
+            WHEN ${dto.stage} = 'cliente_ativo' THEN NULL
+            ELSE conviction_set_by
           END
         WHERE id = ${id}
           ${scope}
