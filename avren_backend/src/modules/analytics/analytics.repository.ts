@@ -176,11 +176,6 @@ export class AnalyticsRepository {
   async getTeamPerformance(ctx: SessionContext, month?: string) {
     return withRls(this.sql, ctx, async (tx) => {
       const { start, end } = this.getMonthBounds(month)
-      const today = new Date()
-      const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-      // A tela passa a preparar o mês seguinte a partir do dia 20. Nesse período,
-      // as marcações feitas no Pipeline já pertencem ao ciclo que está sendo planejado.
-      const convictionStart = start > today ? currentMonthStart : start
       const participants = await tx`
         SELECT
           u.id, u.full_name, u.role,
@@ -243,13 +238,16 @@ export class AnalyticsRepository {
         ) v ON TRUE
         LEFT JOIN LATERAL (
           SELECT
-            COUNT(*) FILTER (WHERE l.conviction = 'quente') AS hot_pipe_count,
+            COUNT(*) FILTER (
+              WHERE l.conviction = 'quente'
+                AND l.conviction_set_at >= ${start.toISOString()}::timestamptz
+                AND l.conviction_set_at < ${end.toISOString()}::timestamptz
+            ) AS hot_pipe_count,
             COUNT(*) FILTER (WHERE l.conviction = 'dream') AS pipe_dream_count
           FROM crm.leads l
           WHERE l.tenant_id = ${ctx.tenantId}
             AND l.banker_id = u.id
-            AND l.conviction_set_at >= ${convictionStart.toISOString()}::timestamptz
-            AND l.conviction_set_at < ${end.toISOString()}::timestamptz
+            AND l.archived_at IS NULL
         ) cv ON TRUE
         LEFT JOIN LATERAL (
           SELECT COALESCE(SUM(p.potential_capture), 0) AS pipe_dream_potential
@@ -284,9 +282,14 @@ export class AnalyticsRepository {
         FROM crm.leads l
         WHERE l.tenant_id = ${ctx.tenantId}
           AND l.archived_at IS NULL
-          AND l.conviction IN ('quente', 'dream')
-          AND l.conviction_set_at >= ${convictionStart.toISOString()}::timestamptz
-          AND l.conviction_set_at < ${end.toISOString()}::timestamptz
+          AND (
+            l.conviction = 'dream'
+            OR (
+              l.conviction = 'quente'
+              AND l.conviction_set_at >= ${start.toISOString()}::timestamptz
+              AND l.conviction_set_at < ${end.toISOString()}::timestamptz
+            )
+          )
           ${ctx.userRole === 'banker' ? tx`AND l.banker_id = ${ctx.userId}` : tx``}
         ORDER BY l.banker_id, l.conviction, l.estimated_aum DESC NULLS LAST,
           l.conviction_set_at DESC
@@ -343,6 +346,7 @@ export class AnalyticsRepository {
         ORDER BY projected_monthly_revenue DESC, projected_one_time_revenue DESC
       `
 
+      const today = new Date()
       return {
         month: start.toISOString().slice(0, 7),
         participants: participants.map((p: any) => {
