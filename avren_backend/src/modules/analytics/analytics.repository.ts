@@ -272,6 +272,21 @@ export class AnalyticsRepository {
         ORDER BY p.potential_capture DESC NULLS LAST, p.created_at DESC
       `
 
+      const convictionLeads = await tx`
+        SELECT
+          l.id, l.banker_id, l.full_name, l.estimated_aum, l.stage,
+          l.conviction, l.conviction_set_at
+        FROM crm.leads l
+        WHERE l.tenant_id = ${ctx.tenantId}
+          AND l.archived_at IS NULL
+          AND l.conviction IN ('quente', 'dream')
+          AND l.conviction_set_at >= ${start.toISOString()}::timestamptz
+          AND l.conviction_set_at < ${end.toISOString()}::timestamptz
+          ${ctx.userRole === 'banker' ? tx`AND l.banker_id = ${ctx.userId}` : tx``}
+        ORDER BY l.banker_id, l.conviction, l.estimated_aum DESC NULLS LAST,
+          l.conviction_set_at DESC
+      `
+
       const hotOpportunities = await tx`
         SELECT *
         FROM (
@@ -351,6 +366,7 @@ export class AnalyticsRepository {
               : 0,
           }
         }),
+        conviction_leads: convictionLeads.map((row: any) => this.toSnakeCaseRecord(row)),
         pipe_dreams: pipeDreams.map((row: any) => this.toSnakeCaseRecord(row)),
         hot_opportunities: hotOpportunities.map((row: any) => this.toSnakeCaseRecord(row)),
         pipeline_candidates: pipelineCandidates.map((row: any) => this.toSnakeCaseRecord(row)),
