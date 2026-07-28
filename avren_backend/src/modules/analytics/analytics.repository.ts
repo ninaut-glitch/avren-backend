@@ -180,6 +180,7 @@ export class AnalyticsRepository {
         SELECT
           u.id, u.full_name, u.role,
           g.id AS goal_id, g.captacao_goal, g.revenue_goal, g.visits_goal,
+          g.goal_month AS goal_effective_from,
           COALESCE(g.hot_pipe_goal, 0)::int AS hot_pipe_goal,
           COALESCE(g.pipe_dream_goal, 0)::int AS pipe_dream_goal,
           COALESCE(g.pipeline_multiplier, 3) AS pipeline_multiplier,
@@ -197,10 +198,19 @@ export class AnalyticsRepository {
           COALESCE(v.visits_done, 0)::int AS visits_done,
           COALESCE(cv.hot_pipe_count, 0)::int AS hot_pipe_count,
           COALESCE(cv.pipe_dream_count, 0)::int AS pipe_dream_count,
+          COALESCE(cv.hot_pipe_value, 0) AS hot_pipe_value,
+          COALESCE(cv.pipe_dream_value, 0) AS pipe_dream_value,
           COALESCE(pd.pipe_dream_potential, 0) AS pipe_dream_potential
         FROM auth.users u
-        LEFT JOIN analytics.banker_goals g
-          ON g.banker_id = u.id AND g.goal_month = ${start.toISOString().slice(0, 10)}::date
+        LEFT JOIN LATERAL (
+          SELECT goal.*
+          FROM analytics.banker_goals goal
+          WHERE goal.tenant_id = ${ctx.tenantId}
+            AND goal.banker_id = u.id
+            AND goal.goal_month <= ${start.toISOString().slice(0, 10)}::date
+          ORDER BY goal.goal_month DESC
+          LIMIT 1
+        ) g ON TRUE
         LEFT JOIN LATERAL (
           SELECT
             COALESCE(SUM(o.estimated_value) FILTER (WHERE o.status IN ('open','in_progress')), 0) AS pipeline_total,
@@ -243,7 +253,15 @@ export class AnalyticsRepository {
                 AND l.conviction_set_at >= ${start.toISOString()}::timestamptz
                 AND l.conviction_set_at < ${end.toISOString()}::timestamptz
             ) AS hot_pipe_count,
-            COUNT(*) FILTER (WHERE l.conviction = 'dream') AS pipe_dream_count
+            COUNT(*) FILTER (WHERE l.conviction = 'dream') AS pipe_dream_count,
+            COALESCE(SUM(l.estimated_aum) FILTER (
+              WHERE l.conviction = 'quente'
+                AND l.conviction_set_at >= ${start.toISOString()}::timestamptz
+                AND l.conviction_set_at < ${end.toISOString()}::timestamptz
+            ), 0) AS hot_pipe_value,
+            COALESCE(SUM(l.estimated_aum) FILTER (
+              WHERE l.conviction = 'dream'
+            ), 0) AS pipe_dream_value
           FROM crm.leads l
           WHERE l.tenant_id = ${ctx.tenantId}
             AND l.banker_id = u.id
