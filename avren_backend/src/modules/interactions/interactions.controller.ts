@@ -1,10 +1,10 @@
 import {
-  Body, Controller, Get, Param, Post,
-  Query, ParseUUIDPipe, Req,
+  Body, Controller, Get, Param, Post, Patch, Delete,
+  Query, ParseUUIDPipe, Req, HttpCode,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InteractionsService } from './interactions.service';
-import { CreateInteractionDto } from './dto/create-interaction.dto';
+import { CreateInteractionDto, UpdateInteractionDto } from './dto/create-interaction.dto';
 import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.decorator';
 
 @ApiTags('Interactions')
@@ -20,12 +20,12 @@ export class InteractionsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Timeline de interações do cliente' })
+  @ApiOperation({ summary: 'Timeline de interacoes do cliente' })
   findAll(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('clientId', ParseUUIDPipe) clientId: string,
-    @Query('type')  type?: string,
-    @Query('page')  page  = 1,
+    @Query('type') type?: string,
+    @Query('page') page = 1,
     @Query('limit') limit = 20,
   ) {
     return this.service.findByClient(this.ctx(user, req), clientId, {
@@ -34,7 +34,7 @@ export class InteractionsController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Registra nova interação do cliente' })
+  @ApiOperation({ summary: 'Registra nova interacao do cliente' })
   create(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('clientId', ParseUUIDPipe) clientId: string,
@@ -44,11 +44,33 @@ export class InteractionsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Detalhes de uma interação' })
+  @ApiOperation({ summary: 'Detalhes de uma interacao' })
   findOne(
     @CurrentUser() user: JwtPayload, @Req() req: any,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.service.findById(this.ctx(user, req), id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Edita uma interacao do cliente (todos os papeis)' })
+  update(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateInteractionDto,
+  ) {
+    return this.service.update(this.ctx(user, req), id, dto, { clientId });
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Exclui uma interacao do cliente (somente socio)' })
+  remove(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('clientId', ParseUUIDPipe) clientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.service.remove(this.ctx(user, req), id, { clientId });
   }
 }
