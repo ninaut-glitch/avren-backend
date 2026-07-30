@@ -1,45 +1,46 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../database/database.provider';
+import { SessionContext, withRls } from '../../database/rls.helper';
 
 @Injectable()
 export class VisitsService {
   constructor(@Inject(DATABASE_CLIENT) private readonly sql: Sql) {}
 
   // Banker: vê apenas as próprias visitas
-  async findAll(tenantId: string, userId: string) {
-    return this.sql`
+  async findAll(ctx: SessionContext) {
+    return withRls(this.sql, ctx, (sql) => sql`
       SELECT v.*, u.full_name AS user_name, l.stage AS lead_stage
       FROM crm.visits v
       JOIN auth.users u ON u.id = v.user_id
       LEFT JOIN crm.leads l ON l.id = v.lead_id
-      WHERE v.tenant_id = ${tenantId}
-        AND v.user_id   = ${userId}
+      WHERE v.tenant_id = ${ctx.tenantId}
+        AND v.user_id   = ${ctx.userId}
       ORDER BY v.visit_date DESC, v.created_at DESC
-    `
+    `)
   }
 
   // Sócio: vê todas as visitas do tenant
-  async findAllTenant(tenantId: string) {
-    return this.sql`
+  async findAllTenant(ctx: SessionContext) {
+    return withRls(this.sql, ctx, (sql) => sql`
       SELECT v.*, u.full_name AS user_name, l.stage AS lead_stage
       FROM crm.visits v
       JOIN auth.users u ON u.id = v.user_id
       LEFT JOIN crm.leads l ON l.id = v.lead_id
-      WHERE v.tenant_id = ${tenantId}
+      WHERE v.tenant_id = ${ctx.tenantId}
       ORDER BY v.visit_date DESC, v.created_at DESC
-    `
+    `)
   }
 
-  async findOne(tenantId: string, id: string) {
-    const [row] = await this.sql`
+  async findOne(ctx: SessionContext, id: string) {
+    const rows = await withRls(this.sql, ctx, (sql) => sql`
       SELECT v.*, u.full_name AS user_name, l.stage AS lead_stage
       FROM crm.visits v
       JOIN auth.users u ON u.id = v.user_id
       LEFT JOIN crm.leads l ON l.id = v.lead_id
-      WHERE v.id = ${id} AND v.tenant_id = ${tenantId}
-    `
-    return row
+      WHERE v.id = ${id} AND v.tenant_id = ${ctx.tenantId}
+    `)
+    return rows[0]
   }
 
   /**
@@ -49,14 +50,14 @@ export class VisitsService {
    * 3. Registra a interação em wealth.interactions (dispara o resumo por IA via trigger)
    * 4. Cria o reminder da devolutiva em crm.reminders (se houver data)
    */
-  async create(tenantId: string, userId: string, body: any) {
-    return this.sql.begin(async (sql) => {
+  async create(ctx: SessionContext, body: any) {
+    return withRls(this.sql, ctx, async (sql) => {
       const [lead] = await sql`
         INSERT INTO crm.leads (
           tenant_id, full_name, stage, banker_id,
           origem_tipo, contexto_relacionamento, estimated_aum, priority
         ) VALUES (
-          ${tenantId}, ${body.client_name}, 'diagnostico', ${userId},
+          ${ctx.tenantId}, ${body.client_name}, 'diagnostico', ${ctx.userId},
           ${body.origem_tipo ?? null}, ${body.contexto ?? null},
           ${body.estimated_aum ?? null}, ${body.priority ?? 'med'}
         )
@@ -68,7 +69,7 @@ export class VisitsService {
           tenant_id, user_id, lead_id, client_name,
           visit_date, devolutiva_date, tier, payload
         ) VALUES (
-          ${tenantId}, ${userId}, ${lead.id}, ${body.client_name},
+          ${ctx.tenantId}, ${ctx.userId}, ${lead.id}, ${body.client_name},
           ${body.visit_date}::date, ${body.devolutiva_date ?? null}::date,
           ${body.tier ?? null}, ${JSON.stringify(body.payload ?? {})}::jsonb
         )
@@ -79,7 +80,7 @@ export class VisitsService {
         INSERT INTO wealth.interactions (
           lead_id, banker_id, type, subject, notes, occurred_at
         ) VALUES (
-          ${lead.id}, ${userId}, 'reuniao',
+          ${lead.id}, ${ctx.userId}, 'reuniao',
           ${'Visita de diagnóstico patrimonial'},
           ${body.resumo ?? null}, ${body.visit_date}::date
         )
@@ -90,7 +91,7 @@ export class VisitsService {
           INSERT INTO crm.reminders (
             tenant_id, user_id, lead_id, title, remind_at, notes
           ) VALUES (
-            ${tenantId}, ${userId}, ${lead.id},
+            ${ctx.tenantId}, ${ctx.userId}, ${lead.id},
             ${'Devolutiva — ' + body.client_name},
             ${body.devolutiva_date}::date,
             ${body.proximo_passo ?? null}
@@ -103,8 +104,8 @@ export class VisitsService {
   }
 
   // Atualiza apenas o registro da visita (lead, interação e reminder não são recriados)
-  async update(tenantId: string, userId: string, id: string, body: any) {
-    const [row] = await this.sql`
+  async update(ctx: SessionContext, id: string, body: any) {
+    const rows = await withRls(this.sql, ctx, (sql) => sql`
       UPDATE crm.visits SET
         client_name     = COALESCE(${body.client_name ?? null}, client_name),
         visit_date      = COALESCE(${body.visit_date ?? null}::date, visit_date),
@@ -112,27 +113,27 @@ export class VisitsService {
         tier            = COALESCE(${body.tier ?? null}, tier),
         payload         = COALESCE(${body.payload ? JSON.stringify(body.payload) : null}::jsonb, payload),
         updated_at      = now()
-      WHERE id = ${id} AND tenant_id = ${tenantId} AND user_id = ${userId}
+      WHERE id = ${id} AND tenant_id = ${ctx.tenantId} AND user_id = ${ctx.userId}
       RETURNING *
-    `
-    return row
+    `)
+    return rows[0]
   }
 
   // Banker exclui as próprias visitas; sócio exclui qualquer uma do tenant
-  async remove(tenantId: string, userId: string, id: string, isSocio: boolean) {
+  async remove(ctx: SessionContext, id: string, isSocio: boolean) {
     if (isSocio) {
-      const [row] = await this.sql`
+      const rows = await withRls(this.sql, ctx, (sql) => sql`
         DELETE FROM crm.visits
-        WHERE id = ${id} AND tenant_id = ${tenantId}
+        WHERE id = ${id} AND tenant_id = ${ctx.tenantId}
         RETURNING id
-      `
-      return row
+      `)
+      return rows[0]
     }
-    const [row] = await this.sql`
+    const rows = await withRls(this.sql, ctx, (sql) => sql`
       DELETE FROM crm.visits
-      WHERE id = ${id} AND tenant_id = ${tenantId} AND user_id = ${userId}
+      WHERE id = ${id} AND tenant_id = ${ctx.tenantId} AND user_id = ${ctx.userId}
       RETURNING id
-    `
-    return row
+    `)
+    return rows[0]
   }
 }

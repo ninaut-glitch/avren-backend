@@ -1,9 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { AuthService } from '../src/modules/auth/auth.service';
 import { DATABASE_CLIENT } from '../src/database/database.provider';
 import * as bcrypt from 'bcrypt';
+
+jest.mock('bcrypt', () => ({
+  hash: jest.fn(async (value: string) => `test-hash:${value}`),
+  compare: jest.fn(async (value: string, hash: string) =>
+    hash === `test-hash:${value}`),
+}));
 
 const mockSql = jest.fn() as any;
 mockSql.mockReturnValue([]);
@@ -19,6 +26,7 @@ describe('AuthService', () => {
         AuthService,
         { provide: DATABASE_CLIENT, useValue: mockSql },
         { provide: JwtService, useValue: mockJwt },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('8h') } },
       ],
     }).compile();
     service = module.get<AuthService>(AuthService);

@@ -9,6 +9,7 @@ import * as bcrypt from 'bcrypt';
 import { authenticator } from 'otplib';
 import { DATABASE_CLIENT } from '../../database/database.provider';
 import { LoginDto } from './dto/login.dto';
+import { SessionContext, withRls } from '../../database/rls.helper';
 
 @Injectable()
 export class AuthService {
@@ -27,13 +28,7 @@ export class AuthService {
 
   async login(dto: LoginDto, ipAddress?: string, userAgent?: string) {
     const [user] = await this.sql`
-      SELECT
-        id, tenant_id, business_unit_id, email,
-        password_hash, mfa_enabled, mfa_secret,
-        role, full_name, is_active
-      FROM auth.users
-      WHERE email = ${dto.email}
-      LIMIT 1
+      SELECT * FROM auth.find_user_for_login(${dto.email})
     `;
 
     if (!user || !user.isActive) {
@@ -72,18 +67,10 @@ export class AuthService {
     const expiresAt = new Date(Date.now() + this.sessionTtlHours * 3_600_000);
 
     await this.sql`
-      INSERT INTO auth.sessions (user_id, token_hash, ip_address, user_agent, expires_at)
-      VALUES (
-        ${user.id},
-        ${tokenHash},
-        ${ipAddress ?? null}::inet,
-        ${userAgent ?? null},
-        ${expiresAt.toISOString()}::timestamptz
+      SELECT auth.create_session(
+        ${user.id}, ${tokenHash}, ${ipAddress ?? null}::inet,
+        ${userAgent ?? null}, ${expiresAt.toISOString()}::timestamptz
       )
-    `;
-
-    await this.sql`
-      UPDATE auth.users SET last_login_at = NOW() WHERE id = ${user.id}
     `;
 
     return {
@@ -103,33 +90,27 @@ export class AuthService {
   async logout(rawToken: string) {
     if (rawToken) {
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-      await this.sql`
-        DELETE FROM auth.sessions WHERE token_hash = ${tokenHash}
-      `;
+      await this.sql`SELECT auth.revoke_session(${tokenHash})`;
     }
     return { message: 'Sessão encerrada' };
   }
 
   async isSessionActive(rawToken: string): Promise<boolean> {
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-    const [session] = await this.sql`
-      SELECT id FROM auth.sessions
-      WHERE token_hash = ${tokenHash}
-        AND expires_at > NOW()
-      LIMIT 1
+    const [row] = await this.sql<{ active: boolean }[]>`
+      SELECT auth.is_session_active(${tokenHash}) AS active
     `;
-    return !!session;
+    return Boolean(row?.active);
   }
 
-  async listBankers(tenantId: string) {
-    const rows = await this.sql`
+  async listBankers(ctx: SessionContext) {
+    return withRls(this.sql, ctx, (tx) => tx`
       SELECT id, full_name, role, email
       FROM auth.users
-      WHERE tenant_id = ${tenantId}
+      WHERE tenant_id = ${ctx.tenantId}
         AND is_active = true
         AND role IN ('banker', 'supervisor', 'socio')
       ORDER BY full_name ASC
-    `;
-    return rows;
+    `);
   }
 }

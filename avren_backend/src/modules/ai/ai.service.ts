@@ -3,10 +3,15 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../database/database.provider';
+import {
+  listActiveTenantIds,
+  withSystemTenantRls,
+} from '../../database/tenant-rls.helper';
 
 interface PendingJob {
   id:            string;
   interactionId: string;
+  tenantId:      string;
 }
 
 // FIX #3: payload tipado para validação após parse
@@ -82,46 +87,54 @@ export class AiService {
   async processPendingJobs(batchSize = 10): Promise<number> {
     if (!this.apiEnabled) return 0;
 
-    const jobs = await this.sql<PendingJob[]>`
-      UPDATE ai.pending_jobs
-      SET status = 'processing'
-      WHERE id IN (
-        SELECT id FROM ai.pending_jobs
-        WHERE status IN ('pending', 'error')
-        ORDER BY created_at
-        LIMIT ${batchSize}
-        FOR UPDATE SKIP LOCKED
-      )
-      RETURNING id, interaction_id AS "interactionId"
-    `;
-
     let processed = 0;
-    for (const job of jobs) {
-      try {
-        await this.processJob(job);
-        await this.sql`
+    const tenantIds = await listActiveTenantIds(this.sql);
+
+    for (const tenantId of tenantIds) {
+      const jobs = await withSystemTenantRls(
+        this.sql,
+        tenantId,
+        (sql) => sql<PendingJob[]>`
           UPDATE ai.pending_jobs
-          SET status = 'done', processed_at = NOW()
-          WHERE id = ${job.id}
-        `;
-        processed++;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        this.logger.error(`AI job ${job.id} falhou: ${msg}`);
-        await this.sql`
-          UPDATE ai.pending_jobs
-          SET status       = 'error',
-              error_msg    = ${msg},
-              processed_at = NOW()
-          WHERE id = ${job.id}
-        `;
+          SET status = 'processing'
+          WHERE tenant_id = ${tenantId}
+            AND id IN (
+              SELECT id FROM ai.pending_jobs
+              WHERE tenant_id = ${tenantId}
+                AND status IN ('pending', 'error')
+              ORDER BY created_at
+              LIMIT ${batchSize}
+              FOR UPDATE SKIP LOCKED
+            )
+          RETURNING id, interaction_id AS "interactionId", tenant_id AS "tenantId"
+        `,
+      );
+
+      for (const job of jobs) {
+        try {
+          await this.processJob(job);
+          await withSystemTenantRls(this.sql, tenantId, (sql) => sql`
+            UPDATE ai.pending_jobs
+            SET status = 'done', processed_at = NOW()
+            WHERE id = ${job.id} AND tenant_id = ${tenantId}
+          `);
+          processed++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.error(`AI job ${job.id} falhou: ${msg}`);
+          await withSystemTenantRls(this.sql, tenantId, (sql) => sql`
+            UPDATE ai.pending_jobs
+            SET status = 'error', error_msg = ${msg}, processed_at = NOW()
+            WHERE id = ${job.id} AND tenant_id = ${tenantId}
+          `);
+        }
       }
     }
     return processed;
   }
 
   private async processJob(job: PendingJob): Promise<void> {
-    const [interaction] = await this.sql`
+    const rows = await withSystemTenantRls(this.sql, job.tenantId, (sql) => sql`
       SELECT
         i.id, i.client_id, i.banker_id,
         i.type, i.subject, i.notes, i.occurred_at,
@@ -131,7 +144,9 @@ export class AiService {
       JOIN wealth.clients c ON c.id = i.client_id
       JOIN auth.users    u ON u.id = i.banker_id
       WHERE i.id = ${job.interactionId}
-    `;
+        AND c.tenant_id = ${job.tenantId}
+    `);
+    const interaction = rows[0];
 
     if (!interaction) {
       throw new Error(`Interaction ${job.interactionId} not found`);
@@ -182,7 +197,7 @@ Analise a interação com o cliente e responda SOMENTE em JSON válido (sem mark
     // FIX #3: parse seguro — nunca joga JSON inválido para o banco
     const parsed = parseSummaryPayload(raw);
 
-    await this.sql`
+    await withSystemTenantRls(this.sql, job.tenantId, (sql) => sql`
       INSERT INTO ai.interaction_summaries (
         interaction_id, client_id, banker_id,
         summary, sentiment, opportunity_level,
@@ -204,13 +219,13 @@ Analise a interação com o cliente e responda SOMENTE em JSON válido (sem mark
         opportunity_level = EXCLUDED.opportunity_level,
         detected_needs    = EXCLUDED.detected_needs,
         next_steps        = EXCLUDED.next_steps
-    `;
+    `);
 
-    await this.sql`
+    await withSystemTenantRls(this.sql, job.tenantId, (sql) => sql`
       UPDATE wealth.interactions SET
         ai_summary    = ${parsed.resumo},
         ai_next_steps = ${parsed.proximos_passos}
       WHERE id = ${job.interactionId}
-    `;
+    `);
   }
 }

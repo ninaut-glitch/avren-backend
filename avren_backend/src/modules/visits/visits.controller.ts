@@ -22,9 +22,9 @@ export class VisitsController {
   @ApiOperation({ summary: 'Lista visitas (banker vê as próprias, sócio vê todas)' })
   findAll(@CurrentUser() user: JwtPayload, @Req() req: any) {
     const c = this.ctx(user, req);
-    return c.userRole === 'socio'
-      ? this.service.findAllTenant(c.tenantId)
-      : this.service.findAll(c.tenantId, c.userId);
+    return ['socio', 'supervisor', 'operacoes', 'admin'].includes(c.userRole)
+      ? this.service.findAllTenant(c)
+      : this.service.findAll(c);
   }
 
   @Get(':id')
@@ -34,7 +34,7 @@ export class VisitsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     const c = this.ctx(user, req);
-    return this.service.findOne(c.tenantId, id);
+    return this.service.findOne(c, id);
   }
 
   @Post()
@@ -44,7 +44,7 @@ export class VisitsController {
     @Body() body: any,
   ) {
     const c = this.ctx(user, req);
-    return this.service.create(c.tenantId, c.userId, body);
+    return this.service.create(c, body);
   }
 
   @Patch(':id')
@@ -55,7 +55,7 @@ export class VisitsController {
     @Body() body: any,
   ) {
     const c = this.ctx(user, req);
-    return this.service.update(c.tenantId, c.userId, id, body);
+    return this.service.update(c, id, body);
   }
 
   @Delete(':id')
@@ -65,6 +65,10 @@ export class VisitsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     const c = this.ctx(user, req);
-    return this.service.remove(c.tenantId, c.userId, id, c.userRole === 'socio');
+    return this.service.remove(
+      c,
+      id,
+      ['socio', 'supervisor', 'operacoes', 'admin'].includes(c.userRole),
+    );
   }
 }

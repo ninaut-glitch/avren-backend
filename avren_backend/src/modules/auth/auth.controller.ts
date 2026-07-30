@@ -37,7 +37,13 @@ export class AuthController {
   @Get('bankers')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lista todos os bankers do tenant' })
-  bankers(@CurrentUser() user: JwtPayload) {
-    return this.authService.listBankers(user.tenantId);
+  bankers(@CurrentUser() user: JwtPayload, @Req() req: FastifyRequest & { rlsContext?: any }) {
+    return this.authService.listBankers(
+      req.rlsContext ?? {
+        tenantId: user.tenantId,
+        userId: user.sub,
+        userRole: user.role,
+      },
+    );
   }
 }
