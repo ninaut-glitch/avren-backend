@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHmac } from 'crypto';
 import {
   XpRawAccount,
   XpRawCommission,
@@ -16,8 +16,8 @@ import {
  *   - Campos obrigatorios ausentes => null => "skipped" (nao derruba o run).
  *   - PRIVACIDADE (estrategia da 018): o documento do titular NUNCA e
  *     persistido bruto. O mapper grava apenas holder_document_hash
- *     (sha256 dos digitos normalizados) e account_number_mask. O
- *     raw_data das contas tambem e higienizado do documento.
+ *     (HMAC-SHA256 dos digitos normalizados) e account_number_mask.
+ *     Todo raw_data e higienizado recursivamente de campos de PII.
  */
 export interface XpMapper<TRaw, TRow> {
   readonly resource: string;
@@ -84,11 +84,14 @@ export interface XpCommissionRow {
 
 // ── Utilitarios ──────────────────────────────────────────────
 
-export function hashDocument(doc: unknown): string | null {
+export function hashDocument(doc: unknown, pepper: string): string | null {
   if (typeof doc !== 'string') return null;
   const digits = doc.replace(/\D/g, '');
   if (digits.length < 11) return null;
-  return createHash('sha256').update(digits).digest('hex');
+  if (!pepper.trim()) {
+    throw new Error('XP_DOCUMENT_PEPPER nao configurado.');
+  }
+  return createHmac('sha256', pepper).update(digits).digest('hex');
 }
 
 export function maskAccountNumber(num: unknown): string | null {
@@ -102,27 +105,58 @@ function numOr<T>(v: unknown, fallback: T): number | T {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** Remove o documento bruto antes de persistir o raw_data. */
-function sanitizeAccountRaw(raw: XpRawAccount): Record<string, unknown> {
-  const clone: Record<string, unknown> = { ...raw };
-  delete clone.holderDocument;
-  return clone;
+const SENSITIVE_RAW_KEYS = [
+  'cpf',
+  'cnpj',
+  'document',
+  'documento',
+  'taxid',
+  'holdername',
+  'fullname',
+  'nomecompleto',
+];
+
+function isSensitiveRawKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return SENSITIVE_RAW_KEYS.some((token) => normalized.includes(token));
+}
+
+/**
+ * Remove PII conhecida em qualquer nivel do payload antes de persistir
+ * raw_data. Os payloads ainda sao provisorios; por isso a protecao e
+ * aplicada aos quatro recursos e tambem a campos aninhados.
+ */
+export function sanitizeRawData(raw: unknown): Record<string, unknown> {
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== 'object') return value;
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([key]) => !isSensitiveRawKey(key))
+        .map(([key, nested]) => [key, visit(nested)]),
+    );
+  };
+
+  return visit(raw) as Record<string, unknown>;
 }
 
 // ── Implementacoes padrao ────────────────────────────────────
 
 export class DefaultAccountMapper implements XpMapper<XpRawAccount, XpAccountRow> {
   readonly resource = 'accounts';
+  constructor(private readonly documentPepper: string) {}
+
   map(raw: XpRawAccount): XpAccountRow | null {
     if (!raw?.accountId) return null;
     return {
       external_account_id: String(raw.accountId),
       account_number_mask: maskAccountNumber(raw.accountNumber),
-      holder_document_hash: hashDocument(raw.holderDocument),
+      holder_document_hash: hashDocument(raw.holderDocument, this.documentPepper),
       holder_name: raw.holderName ?? null,
       advisor_code: raw.advisorCode ?? null,
       status: raw.status ?? null,
-      raw_data: sanitizeAccountRaw(raw),
+      raw_data: sanitizeRawData(raw),
     };
   }
 }
@@ -148,7 +182,7 @@ export class DefaultPositionMapper implements XpMapper<XpRawPosition, XpPosition
       currency: (raw.currency ?? 'BRL').slice(0, 3),
       maturity_date: raw.maturityDate ?? null,
       as_of_date: raw.asOfDate,
-      raw_data: raw,
+      raw_data: sanitizeRawData(raw),
     };
   }
 }
@@ -169,7 +203,7 @@ export class DefaultMovementMapper implements XpMapper<XpRawMovement, XpMovement
       quantity: numOr(raw.quantity, null),
       currency: (raw.currency ?? 'BRL').slice(0, 3),
       occurred_at: raw.occurredAt,
-      raw_data: raw,
+      raw_data: sanitizeRawData(raw),
     };
   }
 }
@@ -186,7 +220,7 @@ export class DefaultCommissionMapper implements XpMapper<XpRawCommission, XpComm
       gross_amount: numOr(raw.grossAmount, 0),
       net_amount: numOr(raw.netAmount, null),
       competence_date: raw.competenceDate,
-      raw_data: raw,
+      raw_data: sanitizeRawData(raw),
     };
   }
 }

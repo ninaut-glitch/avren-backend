@@ -73,6 +73,7 @@ Enquanto não houver credenciais:
 XP_INTEGRATION_ENABLED=false
 XP_CHANNEL=partner_api
 XP_ENVIRONMENT=sandbox
+XP_DOCUMENT_PEPPER=<segredo-aleatorio-exclusivo>
 ```
 
 Depois de cadastrar as credenciais do sandbox e confirmar os contratos:
@@ -81,6 +82,7 @@ Depois de cadastrar as credenciais do sandbox e confirmar os contratos:
 XP_INTEGRATION_ENABLED=true
 XP_CHANNEL=partner_api
 XP_ENVIRONMENT=sandbox
+XP_DOCUMENT_PEPPER=<segredo-aleatorio-exclusivo>
 ```
 
 ## Implantação

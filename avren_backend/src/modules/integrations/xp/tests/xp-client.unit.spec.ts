@@ -10,6 +10,11 @@ import { XpTransport } from '../client/xp-transport';
 import { InMemoryTokenStore, XpTokenProvider } from '../client/xp-token.provider';
 import { XpApiError, XpHttpClient } from '../client/xp-http.client';
 import { planReprocessing } from '../sync/xp-sync.service';
+import {
+  DefaultAccountMapper,
+  hashDocument,
+  sanitizeRawData,
+} from '../mappers/xp-mappers';
 
 function cfg(values: Record<string, string>) {
   return { get: (k: string) => values[k] } as unknown as ConfigService;
@@ -347,5 +352,50 @@ describe('planReprocessing (contrato, requisito 8)', () => {
     expect(plan.entries).toEqual([
       { resource: 'positions', referenceDate: '2026-07-25' },
     ]);
+  });
+});
+
+describe('mappers XP - privacidade', () => {
+  it('usa HMAC com pepper e recusa segredo vazio', () => {
+    const first = hashDocument('123.456.789-09', 'pepper-a');
+    const second = hashDocument('123.456.789-09', 'pepper-b');
+
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toBe(second);
+    expect(() => hashDocument('123.456.789-09', '')).toThrow(
+      /XP_DOCUMENT_PEPPER/,
+    );
+  });
+
+  it('remove PII inclusive de objetos aninhados', () => {
+    expect(
+      sanitizeRawData({
+        accountId: 'A-1',
+        holderDocument: '12345678909',
+        nested: {
+          cpf: '12345678909',
+          full_name: 'Pessoa Teste',
+          productCode: 'CDB',
+        },
+      }),
+    ).toEqual({
+      accountId: 'A-1',
+      nested: { productCode: 'CDB' },
+    });
+  });
+
+  it('mapper de conta nao persiste documento nem nome no raw_data', () => {
+    const row = new DefaultAccountMapper('pepper-de-teste').map({
+      accountId: 'A-1',
+      holderDocument: '123.456.789-09',
+      holderName: 'Pessoa Teste',
+      accountNumber: '123456',
+    });
+
+    expect(row?.holder_document_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(row?.raw_data).toEqual({
+      accountId: 'A-1',
+      accountNumber: '123456',
+    });
   });
 });

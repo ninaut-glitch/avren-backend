@@ -39,6 +39,20 @@ const ADMIN_URL = process.env.TEST_ADMIN_DATABASE_URL;
 const REQUIRED =
   process.env.CI === 'true' || process.env.XP_DB_TESTS_REQUIRED === 'true';
 
+function assertSafeTestDatabaseUrl(raw: string, label: string) {
+  let databaseName: string;
+  try {
+    databaseName = decodeURIComponent(new URL(raw).pathname.replace(/^\//, ''));
+  } catch {
+    throw new Error(`${label} nao e uma URL PostgreSQL valida.`);
+  }
+  if (!/test/i.test(databaseName)) {
+    throw new Error(
+      `${label} aponta para o banco "${databaseName}". O nome precisa conter "test".`,
+    );
+  }
+}
+
 if (REQUIRED && (!APP_URL || !ADMIN_URL)) {
   describe('Integracao XP - banco real', () => {
     it('FALHA: TEST_DATABASE_URL/TEST_ADMIN_DATABASE_URL ausentes em ambiente CI', () => {
@@ -104,6 +118,9 @@ d('Integracao XP - banco real', () => {
   let reconciliation: XpReconciliationService;
 
   beforeAll(async () => {
+    assertSafeTestDatabaseUrl(ADMIN_URL as string, 'TEST_ADMIN_DATABASE_URL');
+    assertSafeTestDatabaseUrl(APP_URL as string, 'TEST_DATABASE_URL');
+
     admin = postgres(ADMIN_URL as string, {
       max: 2,
       onnotice: () => undefined,
@@ -165,7 +182,15 @@ d('Integracao XP - banco real', () => {
     `);
     clientB = cb.id;
 
-    sync = new XpSyncService(sql, httpNever(), new XpSyncLock(sql));
+    sync = new XpSyncService(
+      sql,
+      httpNever(),
+      new XpSyncLock(sql),
+      {
+        get: (key: string) =>
+          key === 'XP_DOCUMENT_PEPPER' ? 'pepper-ficticio-exclusivo-de-teste' : undefined,
+      } as any,
+    );
     reconciliation = new XpReconciliationService(sql);
   });
 

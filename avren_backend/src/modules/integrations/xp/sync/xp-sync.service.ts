@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Sql, TransactionSql } from 'postgres';
 import { DATABASE_CLIENT } from '../../../../database/database.provider';
 import { SessionContext, withRls } from '../../../../database/rls.helper';
@@ -32,6 +33,7 @@ export interface SyncOptions {
 
 export interface SyncRunResult {
   runId: string | null;
+  auditPersisted: boolean;
   status: 'success' | 'partial' | 'failed';
   dryRun: boolean;
   resources: Record<
@@ -72,7 +74,7 @@ class DryRunRollback extends Error {
   }
 }
 
-type PipelineBody = Omit<SyncRunResult, 'runId'>;
+type PipelineBody = Omit<SyncRunResult, 'runId' | 'auditPersisted'>;
 type RlsWrapper = <T>(fn: (tx: TransactionSql) => Promise<T>) => Promise<T>;
 
 const SYNC_ORDER: XpResourceKey[] = [
@@ -112,18 +114,22 @@ const SYNC_ORDER: XpResourceKey[] = [
 @Injectable()
 export class XpSyncService {
   private readonly logger = new Logger(XpSyncService.name);
-  private readonly mappers: Record<string, XpMapper<any, any>> = {
-    accounts: new DefaultAccountMapper(),
-    positions: new DefaultPositionMapper(),
-    movements: new DefaultMovementMapper(),
-    commissions: new DefaultCommissionMapper(),
-  };
+  private readonly mappers: Record<string, XpMapper<any, any>>;
 
   constructor(
     @Inject(DATABASE_CLIENT) private readonly sql: Sql,
     private readonly http: XpHttpClient,
     private readonly lock: XpSyncLock,
-  ) {}
+    config: ConfigService,
+  ) {
+    const documentPepper = String(config.get('XP_DOCUMENT_PEPPER') ?? '');
+    this.mappers = {
+      accounts: new DefaultAccountMapper(documentPepper),
+      positions: new DefaultPositionMapper(),
+      movements: new DefaultMovementMapper(),
+      commissions: new DefaultCommissionMapper(),
+    };
+  }
 
   registerMapper(mapper: XpMapper<any, any>) {
     this.mappers[mapper.resource] = mapper;
@@ -169,7 +175,7 @@ export class XpSyncService {
         errorSummary: 'Ja existe uma sincronizacao em andamento para este tenant.',
       };
       const runId = await this.audit(inTx, tenantId, opts, body, startedAt);
-      return { runId, ...body };
+      return { runId, auditPersisted: runId !== null, ...body };
     }
 
     let body: PipelineBody;
@@ -188,7 +194,7 @@ export class XpSyncService {
     }
 
     const runId = await this.audit(inTx, tenantId, opts, body, startedAt);
-    return { runId, ...body };
+    return { runId, auditPersisted: runId !== null, ...body };
   }
 
   /** Auditoria em transacao propria e curta (unica persistencia do dry-run). */
@@ -431,7 +437,7 @@ export class XpSyncService {
       case 'positions': {
         const r = row as XpPositionRow;
         const accountId = await this.resolveAccountId(
-          tx, r.external_account_id, accountMap,
+          tx, tenantId, r.external_account_id, accountMap,
         );
         if (!accountId) return;
         await tx`
@@ -468,7 +474,7 @@ export class XpSyncService {
       case 'movements': {
         const r = row as XpMovementRow;
         const accountId = await this.resolveAccountId(
-          tx, r.external_account_id, accountMap,
+          tx, tenantId, r.external_account_id, accountMap,
         );
         if (!accountId) return;
         const rows = await tx`
@@ -490,7 +496,7 @@ export class XpSyncService {
       case 'commissions': {
         const r = row as XpCommissionRow;
         const accountId = r.external_account_id
-          ? await this.resolveAccountId(tx, r.external_account_id, accountMap)
+          ? await this.resolveAccountId(tx, tenantId, r.external_account_id, accountMap)
           : null;
         await tx`
           INSERT INTO integrations.xp_commissions
@@ -519,6 +525,7 @@ export class XpSyncService {
 
   private async resolveAccountId(
     tx: TransactionSql,
+    tenantId: string,
     externalAccountId: string,
     cache: Map<string, string>,
   ): Promise<string | null> {
@@ -526,7 +533,8 @@ export class XpSyncService {
     if (cached) return cached;
     const [row] = await tx`
       SELECT id FROM integrations.xp_accounts
-      WHERE external_account_id = ${externalAccountId}
+      WHERE tenant_id = ${tenantId}
+        AND external_account_id = ${externalAccountId}
       LIMIT 1
     `;
     if (!row) return null;

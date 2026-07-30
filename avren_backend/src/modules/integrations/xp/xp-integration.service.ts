@@ -43,6 +43,7 @@ export interface XpStatusResponse {
     subscriptionKey: boolean;
     oauthScope: boolean;
     userAgent: boolean;
+    documentPepper: boolean;
     mtls: boolean;
   };
   /** Como a URL de autenticacao foi obtida: explicita, derivada ou ausente. */
@@ -100,6 +101,9 @@ export class XpIntegrationService {
       // pela XP em todas as chamadas.
       oauthScope: Boolean(String(this.config.get('XP_OAUTH_SCOPE') ?? '').trim()),
       userAgent: Boolean(String(this.config.get('XP_USER_AGENT') ?? '').trim()),
+      documentPepper: Boolean(
+        String(this.config.get('XP_DOCUMENT_PEPPER') ?? '').trim(),
+      ),
       mtls: hasMtlsViaPath || hasMtlsViaBase64,
     };
 
