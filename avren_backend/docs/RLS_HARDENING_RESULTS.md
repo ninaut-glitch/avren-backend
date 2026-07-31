@@ -15,8 +15,8 @@ Branch local: `codex/rls-hardening`
   com revogação do acesso direto às fontes globais.
 - Correção das policies existentes para a role `admin`.
 - Migração separada para `FORCE ROW LEVEL SECURITY`.
-- Procedimento revisável para separar owner e aplicação e demover
-  `avren_service`.
+- Procedimento revisável para separar bootstrap, owner, migrator e runtime,
+  usando `avren_app` na aplicação.
 - Runbook de implantação e rollback.
 
 ## Verificações executadas
@@ -33,10 +33,10 @@ Branch local: `codex/rls-hardening`
 - Migrations 001 a 032, exceto a demo 015, aplicadas do zero em banco
   descartável.
 - Migrations 029 a 032 reaplicadas com sucesso para validar idempotência.
-- Transição de ownership e demotion ensaiada com
-  `avren_service` inicialmente `SUPERUSER BYPASSRLS`.
+- Transição de ownership ensaiada com `avren_service` como bootstrap
+  `SUPERUSER BYPASSRLS` e `avren_app` como runtime restrito.
 - Funções reais de login, criação, validação e revogação de sessão executadas
-  com `avren_service` já demovida.
+  pela role de runtime sem bypass.
 - Smoke test confirmou 1 lead visível no tenant A, zero registros vazados do
   tenant B e bloqueio de escrita cruzada.
 - Acesso direto à materialized view global ficou revogado e o wrapper filtrado
@@ -57,25 +57,44 @@ Branch local: `codex/rls-hardening`
 - Logout removia a sessão no banco, mas o JWT guard não verificava se ela
   continuava ativa.
 - Revogação e consulta de sessão não eram escopadas pelo usuário.
+- A role `avren_service` é o bootstrap user do PostgreSQL e não pode perder
+  `SUPERUSER`; a role de runtime correta passou a ser `avren_app`.
+- `REASSIGN OWNED` tentava transferir objetos internos exigidos pelo servidor;
+  a transição agora limita ownership aos schemas da aplicação.
+- Sequências `OWNED BY` acompanham a tabela e não aceitam troca de owner
+  separada; o script trata apenas sequências independentes.
+
+## Ensaio com cópia recente de produção
+
+- Backup `pre-rls-hardening-2026-07-30` concluído no Easypanel.
+- Cópia restaurada num PostgreSQL 16 isolado, com 51 tabelas de aplicação.
+- Acesso privado temporário entre os dois containers removido após a cópia.
+- Migrations 029, 030 e 031 aplicadas na cópia.
+- Transição para `avren_owner`, `avren_migrator` e `avren_app` concluída.
+- Migration 032 aplicada depois da transição.
+- Verificador completo retornou zero achados.
+- `avren_app`: `superuser=false` e `bypass_rls=false`.
+- Smoke test: 143 leads visíveis no tenant selecionado, zero leads de outro
+  tenant e `ALTER TABLE` bloqueado.
+- Transição e migration 032 reaplicadas com sucesso para validar idempotência.
 
 ## Ainda obrigatório antes de merge
 
-- Revisão independente das migrations 029 a 032 e do script operacional.
-- Executar todas as migrations num dump restaurado, nunca primeiro em produção.
+- Revisão independente do modelo atualizado com `avren_app`.
 - Rodar lint após instalar as dependências de desenvolvimento ausentes.
-- Repetir o ensaio num dump recente de produção e validar o rollback.
+- Definir o procedimento coordenado de senha e troca da `DATABASE_URL`.
 
 ## Segunda rodada após revisão independente
 
 - Criada `avren_migrator`, com `NOINHERIT` e elevação explícita por
   `SET ROLE avren_owner`.
-- Confirmado que `avren_service` não consegue executar `ALTER TABLE`.
+- Confirmado que `avren_app` não consegue executar `ALTER TABLE`.
 - Confirmado que `avren_migrator` consegue criar, alterar e remover objetos
   depois de `SET ROLE`.
 - Removidos default privileges históricos de todas as roles que concediam
-  tabelas futuras a `avren_service`.
+  tabelas futuras a `avren_app`.
 - Materialized view futura criada como `avren_owner`: acesso de
-  `avren_service` permaneceu falso.
+  `avren_app` permaneceu falso.
 - Verificador agora exige policy de leitura e de escrita para cada tabela com
   FORCE RLS.
 - `analytics.refresh_aum_summary()` e
@@ -90,5 +109,9 @@ Branch local: `codex/rls-hardening`
 
 ## Garantias de escopo
 
-Nada foi enviado ao GitHub. Nenhuma migration foi executada. Nenhuma role, senha,
-flag, credencial, banco ou serviço de produção foi alterado.
+As migrations de endurecimento não foram executadas no banco de produção.
+Nenhuma role, senha, flag ou credencial de produção foi alterada. Foi
+configurada uma rotina de backup diário com retenção de 14 cópias, mas o
+Easypanel ainda exibe a ação `Enable`; portanto, a ativação automática permanece
+pendente de confirmação. O backup manual foi concluído e o serviço isolado
+`avren-db-rls-test` foi criado para o ensaio.

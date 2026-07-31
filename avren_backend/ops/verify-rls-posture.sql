@@ -9,7 +9,7 @@ SELECT
   rolcreaterole,
   rolcanlogin
 FROM pg_roles
-WHERE rolname IN ('avren_service', 'avren_owner', 'avren_migrator')
+WHERE rolname IN ('avren_service', 'avren_app', 'avren_owner', 'avren_migrator')
 ORDER BY rolname;
 
 SELECT
@@ -43,8 +43,11 @@ ORDER BY schemaname, tablename, policyname;
 -- Falhas críticas: esperado zero linhas.
 SELECT 'dangerous_app_role' AS finding, rolname AS object
 FROM pg_roles
-WHERE rolname = 'avren_service'
+WHERE rolname = 'avren_app'
   AND (rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole)
+UNION ALL
+SELECT 'runtime_role_missing', 'avren_app'
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'avren_app')
 UNION ALL
 SELECT 'login_owner_role', rolname
 FROM pg_roles
@@ -66,8 +69,25 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname IN (
   'ai','analytics','auth','community','compliance','crm','integrations','wealth'
 )
-  AND c.relkind IN ('r','v','m','S')
+  AND c.relkind IN ('r','p','v','m','S','f')
   AND pg_get_userbyid(c.relowner) <> 'avren_owner'
+UNION ALL
+SELECT 'application_type_wrong_owner', n.nspname || '.' || t.typname
+FROM pg_type t
+JOIN pg_namespace n ON n.oid = t.typnamespace
+WHERE n.nspname IN (
+  'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+)
+  AND t.typtype IN ('d','e')
+  AND pg_get_userbyid(t.typowner) <> 'avren_owner'
+UNION ALL
+SELECT 'application_routine_wrong_owner', n.nspname || '.' || p.proname
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname IN (
+  'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+)
+  AND pg_get_userbyid(p.proowner) <> 'avren_owner'
 UNION ALL
 SELECT 'definer_function_wrong_owner', n.nspname || '.' || p.proname
 FROM pg_proc p
@@ -90,7 +110,7 @@ FROM (VALUES
   ('compliance.fn_sync_kyc_alerts(uuid)')
 ) AS required(signature)
 WHERE NOT has_function_privilege(
-  'avren_service',
+  'avren_app',
   to_regprocedure(required.signature),
   'EXECUTE'
 )
@@ -104,7 +124,7 @@ WHERE (n.nspname || '.' || c.relname) = ANY (ARRAY[
   'analytics.mv_funil_conversao','analytics.mv_patrimonio_por_categoria',
   'analytics.mv_compliance_resumo','analytics.mv_pipeline_oportunidades'
 ])
-  AND has_table_privilege('avren_service', c.oid, 'SELECT')
+  AND has_table_privilege('avren_app', c.oid, 'SELECT')
 UNION ALL
 SELECT 'materialized_view_visible_to_app', n.nspname || '.' || c.relname
 FROM pg_class c
@@ -113,14 +133,14 @@ WHERE n.nspname IN (
   'ai','analytics','auth','community','compliance','crm','integrations','wealth'
 )
   AND c.relkind = 'm'
-  AND has_table_privilege('avren_service', c.oid, 'SELECT')
+  AND has_table_privilege('avren_app', c.oid, 'SELECT')
 UNION ALL
 SELECT 'future_table_default_grant', n.nspname
 FROM pg_default_acl d
 LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
 CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
 WHERE d.defaclobjtype = 'r'
-  AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'avren_service')
+  AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'avren_app')
 UNION ALL
 SELECT 'tenant_table_without_rls', n.nspname || '.' || c.relname
 FROM pg_class c

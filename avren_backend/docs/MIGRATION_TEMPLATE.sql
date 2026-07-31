@@ -25,9 +25,9 @@ CREATE POLICY table_name_tenant_policy ON schema_name.table_name
 
 REVOKE ALL ON TABLE schema_name.table_name FROM PUBLIC;
 GRANT SELECT, INSERT, UPDATE, DELETE
-  ON TABLE schema_name.table_name TO avren_service;
+  ON TABLE schema_name.table_name TO avren_app;
 
 -- Se a tabela usar uma sequência:
--- GRANT USAGE, SELECT ON SEQUENCE schema_name.table_name_id_seq TO avren_service;
+-- GRANT USAGE, SELECT ON SEQUENCE schema_name.table_name_id_seq TO avren_app;
 
 COMMIT;
