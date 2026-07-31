@@ -28,6 +28,8 @@ Branch local: `codex/rls-hardening`
   usando uma role `NOBYPASSRLS`.
 - Suíte de autenticação: 2 de 2 passou. O teste agora simula apenas o algoritmo
   bcrypt, enquanto a integração real com o banco foi validada separadamente.
+- Binding nativo do `bcrypt` recompilado e validado com Node.js 20.20.2:
+  geração e comparação real de hash passaram.
 - Migrations 001 a 032, exceto a demo 015, aplicadas do zero em banco
   descartável.
 - Migrations 029 a 032 reaplicadas com sucesso para validar idempotência.
@@ -83,6 +85,8 @@ Branch local: `codex/rls-hardening`
   tenant A.
 - Usuário inativo foi impedido de receber nova sessão.
 - O JWT guard agora rejeita tokens cuja sessão foi revogada.
+- As suítes de autenticação e JWT passaram sob Node.js 20, além do teste direto
+  do binding nativo do bcrypt.
 
 ## Garantias de escopo
 
