@@ -81,7 +81,6 @@ Branch local: `codex/rls-hardening`
 ## Ainda obrigatório antes de merge
 
 - Revisão independente do modelo atualizado com `avren_app`.
-- Rodar lint após instalar as dependências de desenvolvimento ausentes.
 - Definir o procedimento coordenado de senha e troca da `DATABASE_URL`.
 
 ## Segunda rodada após revisão independente
@@ -106,6 +105,27 @@ Branch local: `codex/rls-hardening`
 - O JWT guard agora rejeita tokens cuja sessão foi revogada.
 - As suítes de autenticação e JWT passaram sob Node.js 20, além do teste direto
   do binding nativo do bcrypt.
+
+## Terceira rodada após revisão independente final
+
+- Corrigido `migrations/run.sh`, que alcançava apenas migrations 000 a 019.
+- Bootstrap completo executado do zero num banco descartável: 31 migrations
+  existentes processadas, incluindo 020 a 032; a 015 foi pulada como previsto.
+- Removido o acesso direto de `avren_app` a `auth.sessions` e às colunas
+  `password_hash` e `mfa_secret` de `auth.users`.
+- `auth.is_session_active` agora invalida imediatamente a sessão de usuário
+  inativo.
+- Bankers não podem adulterar `created_by` em tarefas.
+- Unidades de negócio só podem ser gravadas por `socio`, `operacoes` ou `admin`.
+- O verificador passou a falhar se a role de runtime recuperar acesso a
+  credenciais ou à tabela de sessões.
+- Testes direcionados no clone confirmaram: três privilégios sensíveis falsos,
+  sessão inativa rejeitada, escrita de unidade de negócio bloqueada e autoria
+  falsa de tarefa bloqueada.
+- Migrations 029 e 030, transição de roles e verificador foram reaplicados no
+  clone. Resultado final: zero achados.
+- Suíte local: 64 testes aprovados, 5 testes PostgreSQL da integração XP
+  pulados por exigirem URLs dedicadas; build Nest aprovado.
 
 ## Garantias de escopo
 

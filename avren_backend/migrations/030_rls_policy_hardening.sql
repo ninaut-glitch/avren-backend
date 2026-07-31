@@ -134,8 +134,16 @@ CREATE POLICY audit_logs_tenant_policy ON auth.audit_logs
 ALTER TABLE auth.business_units ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS business_units_tenant_policy ON auth.business_units;
 CREATE POLICY business_units_tenant_policy ON auth.business_units
-  USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID)
-  WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID);
+  USING (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
+    AND current_setting('app.current_user_role', true)
+       IN ('socio','operacoes','admin')
+  )
+  WITH CHECK (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
+    AND current_setting('app.current_user_role', true)
+       IN ('socio','operacoes','admin')
+  );
 
 ALTER TABLE crm.push_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE crm.reminders ENABLE ROW LEVEL SECURITY;
@@ -269,6 +277,12 @@ CREATE POLICY task_policy ON crm.tasks
     tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
     AND current_setting('app.current_user_role', true)
        IN ('banker','supervisor','socio','operacoes','admin')
+    AND (
+      current_setting('app.current_user_role', true)
+         IN ('supervisor','socio','operacoes','admin')
+      OR created_by =
+         NULLIF(current_setting('app.current_user_id', true),'')::UUID
+    )
   );
 
 -- A correção das policies de clients/opportunities/alerts/planejamento,

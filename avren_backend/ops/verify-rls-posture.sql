@@ -153,6 +153,20 @@ WHERE n.nspname IN (
   AND c.relkind = 'r'
   AND NOT c.relrowsecurity
 UNION ALL
+SELECT 'runtime_can_read_sensitive_auth_column', column_name
+FROM information_schema.column_privileges
+WHERE grantee = 'avren_app'
+  AND table_schema = 'auth'
+  AND table_name = 'users'
+  AND column_name IN ('password_hash','mfa_secret')
+  AND privilege_type = 'SELECT'
+UNION ALL
+SELECT 'runtime_can_access_session_table', privilege_type
+FROM information_schema.table_privileges
+WHERE grantee = 'avren_app'
+  AND table_schema = 'auth'
+  AND table_name = 'sessions'
+UNION ALL
 SELECT 'forced_table_without_select_policy', n.nspname || '.' || c.relname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -218,6 +232,8 @@ UNION ALL
 SELECT 'forced_table_not_forced', n.nspname || '.' || c.relname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
+-- auth.users, auth.tenants e auth.sessions são excluídas deliberadamente:
+-- o login ocorre antes do contexto de tenant e avren_app não é owner.
 WHERE (n.nspname || '.' || c.relname) = ANY (ARRAY[
   'ai.interaction_summaries','ai.pending_jobs',
   'analytics.banker_goals','analytics.goal_history','analytics.revenue_entries',

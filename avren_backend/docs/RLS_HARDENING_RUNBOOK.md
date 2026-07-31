@@ -15,17 +15,20 @@ role de runtime sem poderes administrativos e sem bypass de RLS.
 1. Confirmar e guardar a credencial administrativa de `avren_service` fora da
    aplicação, testar login e restauração e não reutilizá-la na API.
 2. Fazer backup verificável e restaurar um clone descartável do banco.
-3. No clone, aplicar `029_rls_bootstrap_functions.sql`,
+3. Em bootstrap completo, usar `migrations/run.sh` e confirmar no resumo que
+   todas as migrations numeradas existentes foram processadas. A 015 só é
+   executada com `--demo`.
+4. No clone, aplicar `029_rls_bootstrap_functions.sql`,
    `030_rls_policy_hardening.sql` e `031_rls_policy_completion.sql`.
-4. Executar os testes de isolamento e o smoke test completo no clone.
-5. Executar `ops/rls-role-transition.sql` no clone usando a credencial
+5. Executar os testes de isolamento e o smoke test completo no clone.
+6. Executar `ops/rls-role-transition.sql` no clone usando a credencial
    administrativa de emergência.
-6. Aplicar `032_force_rls.sql` no clone.
-7. Confirmar que login, pipeline, clientes, visitas, lembretes, metas,
+7. Aplicar `032_force_rls.sql` no clone.
+8. Confirmar que login, pipeline, clientes, visitas, lembretes, metas,
    notificações e processamento de IA continuam funcionando.
-8. Confirmar que uma sessão do tenant A não lê nem altera registros do tenant B.
-9. Ensaiar o rollback e medir a janela.
-10. Repetir em produção numa janela aprovada. Atualizar a senha no Easypanel
+9. Confirmar que uma sessão do tenant A não lê nem altera registros do tenant B.
+10. Ensaiar o rollback e medir a janela.
+11. Repetir em produção numa janela aprovada. Atualizar a senha no Easypanel
     somente no momento coordenado da troca.
 
 ## Critérios obrigatórios antes de produção

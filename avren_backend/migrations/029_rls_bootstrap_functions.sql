@@ -107,10 +107,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, auth, pg_temp
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM auth.sessions
-    WHERE user_id = p_user_id
-      AND token_hash = p_token_hash
-      AND expires_at > NOW()
+    SELECT 1
+    FROM auth.sessions s
+    JOIN auth.users u ON u.id = s.user_id
+    WHERE s.user_id = p_user_id
+      AND s.token_hash = p_token_hash
+      AND s.expires_at > NOW()
+      AND u.is_active = TRUE
   )
 $$;
 

@@ -219,6 +219,18 @@ GRANT EXECUTE ON FUNCTION compliance.fn_sync_kyc_alerts(UUID) TO avren_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA
   ai, analytics, auth, community, compliance, crm, integrations, wealth
 TO avren_app;
+
+-- Credenciais e tokens só podem ser acessados pelas funções SECURITY DEFINER.
+-- Privilégios de coluna são aditivos no PostgreSQL, portanto removemos primeiro
+-- o privilégio de tabela e devolvemos somente as colunas não sensíveis usadas
+-- pelas consultas autenticadas da aplicação.
+REVOKE ALL ON auth.users FROM avren_app;
+GRANT SELECT (
+  id, tenant_id, business_unit_id, email, mfa_enabled, role, full_name,
+  avatar_url, is_active, last_login_at, created_at, updated_at
+) ON auth.users TO avren_app;
+REVOKE ALL ON auth.sessions FROM avren_app;
+
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA
   ai, analytics, auth, community, compliance, crm, integrations, wealth
 TO avren_app;

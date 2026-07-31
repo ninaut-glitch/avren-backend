@@ -8,6 +8,9 @@ DECLARE
   schema_name TEXT;
   table_name TEXT;
 BEGIN
+  -- auth.users, auth.tenants e auth.sessions ficam com ENABLE RLS sem FORCE.
+  -- As funções de login SECURITY DEFINER precisam consultá-las antes de existir
+  -- contexto de tenant; avren_app não é owner e continua sujeito às policies.
   FOREACH item IN ARRAY ARRAY[
     'ai.interaction_summaries','ai.pending_jobs',
     'analytics.banker_goals','analytics.goal_history','analytics.revenue_entries',
