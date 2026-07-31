@@ -256,6 +256,8 @@ REVOKE ALL ON
   analytics.mv_compliance_resumo,
   analytics.mv_pipeline_oportunidades
 FROM avren_app;
+GRANT SELECT ON wealth.aum_summary TO avren_owner;
+GRANT SELECT ON analytics.banker_performance TO avren_owner;
 GRANT SELECT ON wealth.aum_summary_tenant TO avren_app;
 GRANT SELECT ON analytics.banker_performance_tenant TO avren_app;
 
