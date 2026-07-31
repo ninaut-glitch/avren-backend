@@ -231,6 +231,15 @@ GRANT SELECT (
 ) ON auth.users TO avren_app;
 REVOKE ALL ON auth.sessions FROM avren_app;
 
+-- A aplicação pode criar tarefas com autoria explícita, mas nunca reescrever
+-- created_by depois da criação. O UPDATE de tabela inteira precisa ser
+-- removido antes do grant por coluna, pois privilégios são aditivos.
+REVOKE UPDATE ON crm.tasks FROM avren_app;
+GRANT UPDATE (
+  assigned_to, client_id, lead_id, opportunity_id, title, description,
+  due_date, status, priority, completed_at, updated_at
+) ON crm.tasks TO avren_app;
+
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA
   ai, analytics, auth, community, compliance, crm, integrations, wealth
 TO avren_app;

@@ -263,7 +263,39 @@ CREATE POLICY tenants_admin_policy ON auth.tenants
   USING (current_setting('app.current_user_role', true) IN ('socio','operacoes','admin'));
 
 DROP POLICY IF EXISTS task_policy ON crm.tasks;
-CREATE POLICY task_policy ON crm.tasks
+DROP POLICY IF EXISTS task_select_policy ON crm.tasks;
+DROP POLICY IF EXISTS task_insert_policy ON crm.tasks;
+DROP POLICY IF EXISTS task_update_policy ON crm.tasks;
+DROP POLICY IF EXISTS task_delete_policy ON crm.tasks;
+
+CREATE POLICY task_select_policy ON crm.tasks
+  FOR SELECT
+  USING (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
+    AND (
+      assigned_to = NULLIF(current_setting('app.current_user_id', true),'')::UUID
+      OR created_by = NULLIF(current_setting('app.current_user_id', true),'')::UUID
+      OR current_setting('app.current_user_role', true)
+         IN ('supervisor','socio','operacoes','admin')
+    )
+  );
+
+CREATE POLICY task_insert_policy ON crm.tasks
+  FOR INSERT
+  WITH CHECK (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
+    AND current_setting('app.current_user_role', true)
+       IN ('banker','supervisor','socio','operacoes','admin')
+    AND (
+      current_setting('app.current_user_role', true)
+         IN ('supervisor','socio','operacoes','admin')
+      OR created_by =
+         NULLIF(current_setting('app.current_user_id', true),'')::UUID
+    )
+  );
+
+CREATE POLICY task_update_policy ON crm.tasks
+  FOR UPDATE
   USING (
     tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
     AND (
@@ -278,10 +310,22 @@ CREATE POLICY task_policy ON crm.tasks
     AND current_setting('app.current_user_role', true)
        IN ('banker','supervisor','socio','operacoes','admin')
     AND (
-      current_setting('app.current_user_role', true)
+      assigned_to = NULLIF(current_setting('app.current_user_id', true),'')::UUID
+      OR created_by = NULLIF(current_setting('app.current_user_id', true),'')::UUID
+      OR current_setting('app.current_user_role', true)
          IN ('supervisor','socio','operacoes','admin')
-      OR created_by =
-         NULLIF(current_setting('app.current_user_id', true),'')::UUID
+    )
+  );
+
+CREATE POLICY task_delete_policy ON crm.tasks
+  FOR DELETE
+  USING (
+    tenant_id = NULLIF(current_setting('app.current_tenant_id', true),'')::UUID
+    AND (
+      assigned_to = NULLIF(current_setting('app.current_user_id', true),'')::UUID
+      OR created_by = NULLIF(current_setting('app.current_user_id', true),'')::UUID
+      OR current_setting('app.current_user_role', true)
+         IN ('supervisor','socio','operacoes','admin')
     )
   );
 

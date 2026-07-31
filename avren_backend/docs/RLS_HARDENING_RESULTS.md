@@ -127,6 +127,20 @@ Branch local: `codex/rls-hardening`
 - Suíte local: 64 testes aprovados, 5 testes PostgreSQL da integração XP
   pulados por exigirem URLs dedicadas; build Nest aprovado.
 
+## Quarta rodada após re-revisão
+
+- A policy genérica de tarefas foi dividida por comando: SELECT, INSERT,
+  UPDATE e DELETE.
+- Banker só pode inserir tarefa com `created_by` igual ao próprio usuário.
+- Assignee banker pode atualizar e concluir tarefa delegada por outro usuário.
+- O privilégio de UPDATE de tabela inteira foi removido de `crm.tasks`; foram
+  devolvidas apenas as colunas editáveis, excluindo `created_by`.
+- O verificador passou a falhar se `avren_app` recuperar permissão para alterar
+  a autoria de tarefas.
+- Reensaio no clone confirmou os três cenários: conclusão de tarefa delegada
+  permitida, INSERT com autoria falsa bloqueado e UPDATE de autoria bloqueado.
+- Transição de roles reaplicada e verificador final retornou zero achados.
+
 ## Garantias de escopo
 
 As migrations de endurecimento não foram executadas no banco de produção.

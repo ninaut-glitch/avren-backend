@@ -167,6 +167,11 @@ WHERE grantee = 'avren_app'
   AND table_schema = 'auth'
   AND table_name = 'sessions'
 UNION ALL
+SELECT 'runtime_can_rewrite_task_author', 'crm.tasks.created_by'
+WHERE has_column_privilege(
+  'avren_app', 'crm.tasks', 'created_by', 'UPDATE'
+)
+UNION ALL
 SELECT 'forced_table_without_select_policy', n.nspname || '.' || c.relname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
