@@ -83,6 +83,20 @@ Antes de qualquer migration real, testar:
 4. confirmação de que `avren_service` recebe `permission denied` no mesmo
    `ALTER TABLE`.
 
+### Regra para toda nova migration
+
+Os default privileges de `avren_service` foram removidos de propósito. Toda
+migration que criar uma tabela, sequência ou função consumida pela aplicação
+deve declarar os privilégios necessários explicitamente.
+
+Use `docs/MIGRATION_TEMPLATE.sql` como ponto de partida. Antes do merge:
+
+1. conceda apenas `SELECT`, `INSERT`, `UPDATE` e `DELETE` realmente usados;
+2. conceda `USAGE, SELECT` apenas nas sequências necessárias;
+3. revogue acesso público de funções privilegiadas antes do `GRANT EXECUTE`;
+4. execute `ops/verify-rls-posture.sql` e confirme zero achados;
+5. valide o endpoint com `avren_service`, não com owner ou superuser.
+
 ### Views globais sem consumidor
 
 `compliance.kyc_alerts` e as cinco `analytics.mv_*` permanecem deliberadamente

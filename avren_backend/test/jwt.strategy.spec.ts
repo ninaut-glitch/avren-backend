@@ -44,4 +44,15 @@ describe('JwtStrategy', () => {
       UnauthorizedException,
     );
   });
+
+  it('rejeita com 401 quando a validação da sessão falha no banco', async () => {
+    const strategy = new JwtStrategy(
+      { get: jest.fn().mockReturnValue('segredo-de-teste') } as any,
+      { isSessionActive: jest.fn().mockRejectedValue(new Error('database unavailable')) } as any,
+    );
+
+    await expect(strategy.validate(request, payload)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
 });

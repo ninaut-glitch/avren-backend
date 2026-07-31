@@ -22,7 +22,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Token inválido');
     }
     const token = (req.headers.authorization ?? '').replace('Bearer ', '');
-    if (!token || !(await this.authService.isSessionActive(payload.sub, token))) {
+    if (!token) {
+      throw new UnauthorizedException('Sessão inválida ou encerrada');
+    }
+    try {
+      if (!(await this.authService.isSessionActive(payload.sub, token))) {
+        throw new UnauthorizedException('Sessão inválida ou encerrada');
+      }
+    } catch {
+      // Falha fechada: indisponibilidade do banco nunca autentica a requisição.
       throw new UnauthorizedException('Sessão inválida ou encerrada');
     }
     return payload;

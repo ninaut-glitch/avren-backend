@@ -73,7 +73,9 @@ SELECT 'definer_function_wrong_owner', n.nspname || '.' || p.proname
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE p.prosecdef
-  AND n.nspname IN ('auth','analytics','compliance')
+  AND n.nspname IN (
+    'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+  )
   AND pg_get_userbyid(p.proowner) <> 'avren_owner'
 UNION ALL
 SELECT 'required_function_not_executable', required.signature
@@ -153,6 +155,44 @@ WHERE c.relforcerowsecurity
   AND NOT EXISTS (
     SELECT 1 FROM pg_policy p
     WHERE p.polrelid = c.oid AND p.polcmd IN ('a','w','d','*')
+  )
+UNION ALL
+SELECT 'tenant_table_without_scoped_select_policy', n.nspname || '.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a
+  ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
+WHERE n.nspname IN (
+    'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+  )
+  AND c.relkind = 'r'
+  AND c.relforcerowsecurity
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_policies p
+    WHERE p.schemaname = n.nspname
+      AND p.tablename = c.relname
+      AND p.cmd IN ('SELECT','ALL')
+      AND COALESCE(p.qual, '') LIKE '%app.current_tenant_id%'
+  )
+UNION ALL
+SELECT 'tenant_table_without_scoped_write_policy', n.nspname || '.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+JOIN pg_attribute a
+  ON a.attrelid = c.oid AND a.attname = 'tenant_id' AND NOT a.attisdropped
+WHERE n.nspname IN (
+    'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+  )
+  AND c.relkind = 'r'
+  AND c.relforcerowsecurity
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_policies p
+    WHERE p.schemaname = n.nspname
+      AND p.tablename = c.relname
+      AND p.cmd IN ('INSERT','UPDATE','ALL')
+      AND COALESCE(p.with_check, '') LIKE '%app.current_tenant_id%'
   )
 UNION ALL
 SELECT 'forced_table_not_forced', n.nspname || '.' || c.relname
