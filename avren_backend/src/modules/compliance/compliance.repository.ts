@@ -91,10 +91,11 @@ export class ComplianceRepository {
   }
 
   async syncKycAlerts(ctx: SessionContext): Promise<number> {
-    // fn_sync_kyc_alerts usa SECURITY DEFINER — chamada direta sem RLS
-    const [{ fn_sync_kyc_alerts }] = await this.sql`
-      SELECT compliance.fn_sync_kyc_alerts()
-    `;
-    return Number(fn_sync_kyc_alerts);
+    return withRls(this.sql, ctx, async (tx) => {
+      const [{ fn_sync_kyc_alerts }] = await tx`
+        SELECT compliance.fn_sync_kyc_alerts(${ctx.tenantId})
+      `;
+      return Number(fn_sync_kyc_alerts);
+    });
   }
 }

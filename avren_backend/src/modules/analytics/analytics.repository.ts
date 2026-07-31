@@ -44,7 +44,7 @@ export class AnalyticsRepository {
           COALESCE(SUM(aum_avren), 0)        AS aum_total,
           COALESCE(SUM(total_patrimonio), 0) AS patrimonio_total,
           COUNT(*)::int                       AS clientes_ativos
-        FROM wealth.aum_summary
+        FROM wealth.aum_summary_tenant
         WHERE tenant_id = ${ctx.tenantId}
       `
 
@@ -107,7 +107,7 @@ export class AnalyticsRepository {
       `
 
       const bankers = await tx`
-        SELECT * FROM analytics.banker_performance
+        SELECT * FROM analytics.banker_performance_tenant
         WHERE tenant_id = ${ctx.tenantId}
         ORDER BY aum_total DESC NULLS LAST
       `
@@ -138,7 +138,7 @@ export class AnalyticsRepository {
   async getBankerPerformance(ctx: SessionContext) {
     return withRls(this.sql, ctx, async (tx) => {
       return tx`
-        SELECT * FROM analytics.banker_performance
+        SELECT * FROM analytics.banker_performance_tenant
         WHERE tenant_id = ${ctx.tenantId}
         ORDER BY aum_total DESC NULLS LAST
       `
@@ -515,7 +515,7 @@ export class AnalyticsRepository {
 
   async refreshAumSummary() {
     await this.sql`
-      REFRESH MATERIALIZED VIEW CONCURRENTLY wealth.aum_summary
+      SELECT analytics.refresh_aum_summary()
     `
   }
 }

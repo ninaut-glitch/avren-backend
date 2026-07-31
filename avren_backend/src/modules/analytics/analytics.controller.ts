@@ -97,7 +97,7 @@ export class AnalyticsController {
 
   @Post('aum/refresh')
   @HttpCode(204)
-  @Roles('socio', 'operacoes')
+  @Roles('socio', 'operacoes', 'admin')
   @ApiOperation({ summary: 'Atualiza a materialized view de AUM' })
   async refreshAum() {
     await this.repo.refreshAumSummary();

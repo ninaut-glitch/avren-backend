@@ -11,6 +11,12 @@ import { CurrentUser, JwtPayload } from '../../common/decorators/current-user.de
 export class PushController {
   constructor(private readonly service: PushService) {}
 
+  private ctx(user: JwtPayload, req: any) {
+    return req.rlsContext ?? {
+      tenantId: user.tenantId, userId: user.sub, userRole: user.role,
+    };
+  }
+
   @Get('public-key')
   @ApiOperation({ summary: 'Chave publica VAPID para inscricao no navegador' })
   getPublicKey() {
@@ -19,8 +25,8 @@ export class PushController {
 
   @Get('status')
   @ApiOperation({ summary: 'Dispositivos inscritos do usuario atual' })
-  getStatus(@CurrentUser() user: JwtPayload) {
-    return this.service.getStatus(user.sub);
+  getStatus(@CurrentUser() user: JwtPayload, @Req() req: any) {
+    return this.service.getStatus(this.ctx(user, req));
   }
 
   @Post('subscribe')
@@ -30,7 +36,7 @@ export class PushController {
     @Req() req: any,
     @Body() body: any,
   ) {
-    return this.service.subscribe(user.tenantId, user.sub, {
+    return this.service.subscribe(this.ctx(user, req), {
       ...body,
       user_agent: body.user_agent ?? req.headers?.['user-agent'] ?? null,
     });
@@ -39,14 +45,19 @@ export class PushController {
   @Delete('subscribe')
   @HttpCode(204)
   @ApiOperation({ summary: 'Remove a inscricao de um dispositivo' })
-  async unsubscribe(@CurrentUser() user: JwtPayload, @Body() body: any) {
-    await this.service.unsubscribe(user.sub, body.endpoint);
+  async unsubscribe(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Body() body: any,
+  ) {
+    await this.service.unsubscribe(this.ctx(user, req), body.endpoint);
   }
 
   @Post('test')
   @ApiOperation({ summary: 'Envia uma notificacao de teste para o usuario atual' })
-  sendTest(@CurrentUser() user: JwtPayload) {
-    return this.service.sendToUser(user.sub, {
+  sendTest(@CurrentUser() user: JwtPayload, @Req() req: any) {
+    const ctx = this.ctx(user, req);
+    return this.service.sendToUser(ctx, ctx.userId, {
       title: 'AVREN OS',
       body: 'Notificacoes ativadas com sucesso.',
       url: '/dashboard',

@@ -22,9 +22,9 @@ export class AuthController {
   @HttpCode(204)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Invalida a sessão atual' })
-  async logout(@Req() req: FastifyRequest) {
+  async logout(@CurrentUser() user: JwtPayload, @Req() req: FastifyRequest) {
     const token = (req.headers.authorization ?? '').replace('Bearer ', '');
-    await this.authService.logout(token);
+    await this.authService.logout(user.sub, token);
   }
 
   @Get('me')
@@ -37,7 +37,13 @@ export class AuthController {
   @Get('bankers')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Lista todos os bankers do tenant' })
-  bankers(@CurrentUser() user: JwtPayload) {
-    return this.authService.listBankers(user.tenantId);
+  bankers(@CurrentUser() user: JwtPayload, @Req() req: FastifyRequest & { rlsContext?: any }) {
+    return this.authService.listBankers(
+      req.rlsContext ?? {
+        tenantId: user.tenantId,
+        userId: user.sub,
+        userRole: user.role,
+      },
+    );
   }
 }

@@ -3,6 +3,12 @@ import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../../database/database.provider';
 import { SessionContext, withRls } from '../../../database/rls.helper';
 
+/**
+ * NOTA v3.1: o databaseProvider real aplica transform.column =
+ * postgres.toCamel, entao TODA leitura de coluna volta em camelCase
+ * (last_sync_at -> lastSyncAt, linked_accounts -> linkedAccounts).
+ * O fallback de counts abaixo foi alinhado a esse contrato.
+ */
 @Injectable()
 export class XpIntegrationRepository {
   constructor(@Inject(DATABASE_CLIENT) private readonly sql: Sql) {}
@@ -21,26 +27,26 @@ export class XpIntegrationRepository {
       const [counts] = await tx`
         SELECT
           (SELECT COUNT(*)::int FROM integrations.xp_accounts
-             WHERE tenant_id = ${ctx.tenantId}) AS accounts,
+            WHERE tenant_id = ${ctx.tenantId}) AS accounts,
           (SELECT COUNT(*)::int FROM integrations.xp_accounts
-             WHERE tenant_id = ${ctx.tenantId} AND client_id IS NOT NULL) AS linked_accounts,
+            WHERE tenant_id = ${ctx.tenantId} AND client_id IS NOT NULL) AS linked_accounts,
           (SELECT COUNT(*)::int FROM integrations.xp_positions
-             WHERE tenant_id = ${ctx.tenantId}
-               AND as_of_date = (
-                 SELECT MAX(as_of_date)
-                 FROM integrations.xp_positions
-                 WHERE tenant_id = ${ctx.tenantId}
-               )) AS current_positions,
+            WHERE tenant_id = ${ctx.tenantId}
+              AND as_of_date = (
+                SELECT MAX(as_of_date)
+                FROM integrations.xp_positions
+                WHERE tenant_id = ${ctx.tenantId}
+              )) AS current_positions,
           (SELECT COUNT(*)::int FROM integrations.xp_movements
-             WHERE tenant_id = ${ctx.tenantId}) AS movements
+            WHERE tenant_id = ${ctx.tenantId}) AS movements
       `;
 
       return {
         connection: connection ?? null,
         counts: counts ?? {
           accounts: 0,
-          linked_accounts: 0,
-          current_positions: 0,
+          linkedAccounts: 0,
+          currentPositions: 0,
           movements: 0,
         },
       };

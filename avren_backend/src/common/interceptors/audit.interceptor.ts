@@ -6,6 +6,7 @@ import { Observable, tap } from 'rxjs';
 import { Sql } from 'postgres';
 import { DATABASE_CLIENT } from '../../database/database.provider';
 import { JwtPayload } from '../decorators/current-user.decorator';
+import { withRls } from '../../database/rls.helper';
 
 const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -42,7 +43,12 @@ export class AuditInterceptor implements NestInterceptor {
         try {
           // FIX #3: colunas alinhadas com 002_auth.sql
           // auth.audit_logs(tenant_id, user_id, action, entity_type, ip_address)
-          await this.sql`
+          const rlsContext = request.rlsContext ?? {
+            tenantId: user.tenantId,
+            userId: user.sub,
+            userRole: user.role,
+          };
+          await withRls(this.sql, rlsContext, (sql) => sql`
             INSERT INTO auth.audit_logs
               (tenant_id, user_id, action, entity_type, ip_address)
             VALUES (
@@ -52,7 +58,7 @@ export class AuditInterceptor implements NestInterceptor {
               ${entityFromUrl(request.url)},
               ${request.ip ?? null}::inet
             )
-          `;
+          `);
         } catch (err) {
           // Audit log nunca deve derrubar a request principal
           this.logger.warn(`Audit log failed: ${String(err)}`);

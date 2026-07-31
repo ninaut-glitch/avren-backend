@@ -4,6 +4,11 @@ import { Cron } from '@nestjs/schedule';
 import { Sql } from 'postgres';
 import * as webpush from 'web-push';
 import { DATABASE_CLIENT } from '../../database/database.provider';
+import { SessionContext, withRls } from '../../database/rls.helper';
+import {
+  listActiveTenantIds,
+  withSystemTenantRls,
+} from '../../database/tenant-rls.helper';
 
 @Injectable()
 export class PushService implements OnModuleInit {
@@ -40,12 +45,12 @@ export class PushService implements OnModuleInit {
     };
   }
 
-  async subscribe(tenantId: string, userId: string, body: any) {
-    const [row] = await this.sql`
+  async subscribe(ctx: SessionContext, body: any) {
+    const rows = await withRls(this.sql, ctx, (sql) => sql`
       INSERT INTO crm.push_subscriptions
         (tenant_id, user_id, endpoint, p256dh, auth, user_agent)
       VALUES (
-        ${tenantId}, ${userId},
+        ${ctx.tenantId}, ${ctx.userId},
         ${body.endpoint}, ${body.keys?.p256dh}, ${body.keys?.auth},
         ${body.user_agent ?? null}
       )
@@ -56,37 +61,51 @@ export class PushService implements OnModuleInit {
         auth       = EXCLUDED.auth,
         user_agent = EXCLUDED.user_agent
       RETURNING id, created_at
-    `;
-    return row;
+    `);
+    return rows[0];
   }
 
-  async unsubscribe(userId: string, endpoint: string) {
-    await this.sql`
+  async unsubscribe(ctx: SessionContext, endpoint: string) {
+    await withRls(this.sql, ctx, (sql) => sql`
       DELETE FROM crm.push_subscriptions
-      WHERE user_id = ${userId} AND endpoint = ${endpoint}
-    `;
+      WHERE tenant_id = ${ctx.tenantId}
+        AND user_id = ${ctx.userId}
+        AND endpoint = ${endpoint}
+    `);
   }
 
-  async getStatus(userId: string) {
-    const rows = await this.sql`
+  async getStatus(ctx: SessionContext) {
+    const rows = await withRls(this.sql, ctx, (sql) => sql`
       SELECT id, user_agent, created_at, last_used_at
       FROM crm.push_subscriptions
-      WHERE user_id = ${userId}
+      WHERE tenant_id = ${ctx.tenantId} AND user_id = ${ctx.userId}
       ORDER BY created_at DESC
-    `;
+    `);
     return { enabled: this.enabled, devices: rows };
   }
 
   // Envia para todos os dispositivos do usuario. Inscricoes mortas
   // (404/410) sao removidas para a tabela nao acumular lixo.
-  async sendToUser(userId: string, payload: object) {
+  async sendToUser(ctx: SessionContext, userId: string, payload: object) {
+    return this.sendToUserInTenant(ctx.tenantId, userId, payload, ctx);
+  }
+
+  private async sendToUserInTenant(
+    tenantId: string,
+    userId: string,
+    payload: object,
+    ctx?: SessionContext,
+  ) {
     if (!this.enabled) return { sent: 0, removed: 0 };
 
-    const subs = await this.sql`
+    const read = (sql: any) => sql`
       SELECT id, endpoint, p256dh, auth
       FROM crm.push_subscriptions
-      WHERE user_id = ${userId}
+      WHERE tenant_id = ${tenantId} AND user_id = ${userId}
     `;
+    const subs = (ctx
+      ? await withRls(this.sql, ctx, read)
+      : await withSystemTenantRls(this.sql, tenantId, read)) as any[];
 
     let sent = 0;
     let removed = 0;
@@ -101,16 +120,17 @@ export class PushService implements OnModuleInit {
           JSON.stringify(payload),
         );
         sent++;
-        await this.sql`
+        await withSystemTenantRls(this.sql, tenantId, (sql) => sql`
           UPDATE crm.push_subscriptions
           SET last_used_at = now()
-          WHERE id = ${sub.id}
-        `;
+          WHERE id = ${sub.id} AND tenant_id = ${tenantId}
+        `);
       } catch (err: any) {
         if (err?.statusCode === 404 || err?.statusCode === 410) {
-          await this.sql`
-            DELETE FROM crm.push_subscriptions WHERE id = ${sub.id}
-          `;
+          await withSystemTenantRls(this.sql, tenantId, (sql) => sql`
+            DELETE FROM crm.push_subscriptions
+            WHERE id = ${sub.id} AND tenant_id = ${tenantId}
+          `);
           removed++;
         } else {
           this.logger.error(
@@ -128,47 +148,49 @@ export class PushService implements OnModuleInit {
   async sendDailyReminders() {
     if (!this.enabled) return;
 
-    const rows = await this.sql`
-      SELECT
-        r.user_id,
-        COUNT(*)::int AS total,
-        MIN(r.title)  AS first_title
-      FROM crm.reminders r
-      WHERE r.remind_at = CURRENT_DATE
-        AND r.done = false
-        AND EXISTS (
-          SELECT 1 FROM crm.push_subscriptions p
-          WHERE p.user_id = r.user_id
-        )
-      GROUP BY r.user_id
-    `;
+    const tenantIds = await listActiveTenantIds(this.sql);
+    let userCount = 0;
+    let totalSent = 0;
 
-    if (rows.length === 0) {
+    for (const tenantId of tenantIds) {
+      const rows = await withSystemTenantRls(this.sql, tenantId, (sql) => sql`
+        SELECT r.user_id, COUNT(*)::int AS total, MIN(r.title) AS first_title
+        FROM crm.reminders r
+        WHERE r.tenant_id = ${tenantId}
+          AND r.remind_at = CURRENT_DATE
+          AND r.done = false
+          AND EXISTS (
+            SELECT 1 FROM crm.push_subscriptions p
+            WHERE p.tenant_id = ${tenantId} AND p.user_id = r.user_id
+          )
+        GROUP BY r.user_id
+      `);
+
+      userCount += rows.length;
+      for (const row of rows) {
+        const total = Number(row.total);
+        const body =
+          total === 1
+            ? row.first_title
+            : `${row.first_title} e mais ${total - 1} lembrete(s)`;
+
+        const result = await this.sendToUserInTenant(tenantId, row.user_id, {
+          title: total === 1 ? 'Lembrete de hoje' : `${total} lembretes hoje`,
+          body,
+          url: '/dashboard',
+          tag: 'daily-reminders',
+        });
+        totalSent += result.sent;
+      }
+    }
+
+    if (userCount === 0) {
       this.logger.log('Resumo diario: nenhum lembrete para notificar.');
       return;
     }
 
-    let totalSent = 0;
-
-    for (const row of rows) {
-      const total = Number(row.total);
-      const body =
-        total === 1
-          ? row.first_title
-          : `${row.first_title} e mais ${total - 1} lembrete(s)`;
-
-      const result = await this.sendToUser(row.user_id, {
-        title: total === 1 ? 'Lembrete de hoje' : `${total} lembretes hoje`,
-        body,
-        url: '/dashboard',
-        tag: 'daily-reminders',
-      });
-
-      totalSent += result.sent;
-    }
-
     this.logger.log(
-      `Resumo diario enviado: ${totalSent} notificacao(oes) para ${rows.length} usuario(s).`,
+      `Resumo diario enviado: ${totalSent} notificacao(oes) para ${userCount} usuario(s).`,
     );
   }
 }

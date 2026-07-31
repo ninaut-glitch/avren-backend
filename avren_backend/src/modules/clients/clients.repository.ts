@@ -27,7 +27,7 @@ export class ClientsRepository {
         FROM wealth.clients c
         JOIN  auth.users u   ON u.id = c.banker_id
         LEFT JOIN auth.users s ON s.id = c.supervisor_id
-        LEFT JOIN wealth.aum_summary aum ON aum.client_id = c.id
+        LEFT JOIN wealth.aum_summary_tenant aum ON aum.client_id = c.id
         WHERE TRUE
           ${filters.status    ? tx`AND c.status    = ${filters.status}`    : tx``}
           ${filters.banker_id ? tx`AND c.banker_id = ${filters.banker_id}` : tx``}
@@ -54,7 +54,7 @@ export class ClientsRepository {
           COALESCE(aum.total_patrimonio, 0) AS total_patrimonio
         FROM wealth.clients c
         JOIN  auth.users u ON u.id = c.banker_id
-        LEFT JOIN wealth.aum_summary aum ON aum.client_id = c.id
+        LEFT JOIN wealth.aum_summary_tenant aum ON aum.client_id = c.id
         WHERE c.id = ${id}
       `;
       return client ?? null;

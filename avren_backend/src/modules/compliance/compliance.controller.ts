@@ -50,7 +50,7 @@ export class ComplianceController {
   }
 
   @Post('alerts/sync')
-  @Roles('socio', 'operacoes')
+  @Roles('socio', 'operacoes', 'admin')
   @ApiOperation({ summary: 'Sincronização manual de alertas KYC/Suitability' })
   sync(@CurrentUser() user: JwtPayload, @Req() req: any) {
     return this.service.syncAlerts(this.ctx(user, req));
