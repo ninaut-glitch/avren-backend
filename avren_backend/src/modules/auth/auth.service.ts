@@ -44,9 +44,17 @@ export class AuthService {
       if (!dto.mfa_code) {
         throw new UnauthorizedException('Código MFA obrigatório');
       }
+      const [{ secret: mfaSecret } = { secret: null }] = await this.sql<
+        { secret: string | null }[]
+      >`
+        SELECT auth.get_mfa_secret_for_login(${user.id}) AS secret
+      `;
+      if (!mfaSecret) {
+        throw new UnauthorizedException('MFA indisponível');
+      }
       const validMfa = authenticator.verify({
         token:  dto.mfa_code,
-        secret: user.mfaSecret,
+        secret: mfaSecret,
       });
       if (!validMfa) {
         throw new UnauthorizedException('Código MFA inválido ou expirado');
@@ -87,18 +95,18 @@ export class AuthService {
     };
   }
 
-  async logout(rawToken: string) {
+  async logout(userId: string, rawToken: string) {
     if (rawToken) {
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-      await this.sql`SELECT auth.revoke_session(${tokenHash})`;
+      await this.sql`SELECT auth.revoke_session(${userId}, ${tokenHash})`;
     }
     return { message: 'Sessão encerrada' };
   }
 
-  async isSessionActive(rawToken: string): Promise<boolean> {
+  async isSessionActive(userId: string, rawToken: string): Promise<boolean> {
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
     const [row] = await this.sql<{ active: boolean }[]>`
-      SELECT auth.is_session_active(${tokenHash}) AS active
+      SELECT auth.is_session_active(${userId}, ${tokenHash}) AS active
     `;
     return Boolean(row?.active);
   }

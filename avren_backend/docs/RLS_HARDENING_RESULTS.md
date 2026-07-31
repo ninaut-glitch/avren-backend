@@ -23,7 +23,7 @@ Branch local: `codex/rls-hardening`
 
 - Build Nest: passou, zero erros.
 - Teste novo dos helpers de tenant: 3 de 3 passaram.
-- Suítes unitárias e de contrato: 61 testes passaram.
+- Suítes unitárias e de contrato: 63 testes passaram.
 - Testes PostgreSQL da integração XP: 5 de 5 passaram contra PostgreSQL 16.14,
   usando uma role `NOBYPASSRLS`.
 - Suíte de autenticação: 2 de 2 passou. O teste agora simula apenas o algoritmo
@@ -49,6 +49,12 @@ Branch local: `codex/rls-hardening`
 - A role `avren_owner` precisava assumir também o ownership dos schemas.
 - Os `GRANT EXECUTE` das funções de autenticação desapareciam depois da troca
   de owner e agora são reaplicados explicitamente.
+- Não havia uma role separada para migrations depois da demotion.
+- Default privileges históricos permitiam que futuras materialized views
+  nascessem acessíveis pela aplicação.
+- Logout removia a sessão no banco, mas o JWT guard não verificava se ela
+  continuava ativa.
+- Revogação e consulta de sessão não eram escopadas pelo usuário.
 
 ## Ainda obrigatório antes de merge
 
@@ -56,6 +62,27 @@ Branch local: `codex/rls-hardening`
 - Executar todas as migrations num dump restaurado, nunca primeiro em produção.
 - Rodar lint após instalar as dependências de desenvolvimento ausentes.
 - Repetir o ensaio num dump recente de produção e validar o rollback.
+
+## Segunda rodada após revisão independente
+
+- Criada `avren_migrator`, com `NOINHERIT` e elevação explícita por
+  `SET ROLE avren_owner`.
+- Confirmado que `avren_service` não consegue executar `ALTER TABLE`.
+- Confirmado que `avren_migrator` consegue criar, alterar e remover objetos
+  depois de `SET ROLE`.
+- Removidos default privileges históricos de todas as roles que concediam
+  tabelas futuras a `avren_service`.
+- Materialized view futura criada como `avren_owner`: acesso de
+  `avren_service` permaneceu falso.
+- Verificador agora exige policy de leitura e de escrita para cada tabela com
+  FORCE RLS.
+- `analytics.refresh_aum_summary()` e
+  `compliance.fn_sync_kyc_alerts(UUID)` executaram após a demotion.
+- Trigger de `compliance.alert_history` gravou uma linha com FORCE RLS ativo.
+- Sessão do tenant B não pôde ser revogada nem consultada usando o usuário do
+  tenant A.
+- Usuário inativo foi impedido de receber nova sessão.
+- O JWT guard agora rejeita tokens cuja sessão foi revogada.
 
 ## Garantias de escopo
 

@@ -3,20 +3,27 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { JwtPayload } from '../../common/decorators/current-user.decorator';
+import { FastifyRequest } from 'fastify';
+import { AuthService } from './auth.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(config: ConfigService) {
+  constructor(config: ConfigService, private readonly authService: AuthService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.get<string>('JWT_SECRET')!,
+      passReqToCallback: true,
     });
   }
 
-  validate(payload: JwtPayload) {
+  async validate(req: FastifyRequest, payload: JwtPayload) {
     if (!payload.sub || !payload.tenantId) {
       throw new UnauthorizedException('Token inválido');
+    }
+    const token = (req.headers.authorization ?? '').replace('Bearer ', '');
+    if (!token || !(await this.authService.isSessionActive(payload.sub, token))) {
+      throw new UnauthorizedException('Sessão inválida ou encerrada');
     }
     return payload;
   }

@@ -9,7 +9,7 @@ SELECT
   rolcreaterole,
   rolcanlogin
 FROM pg_roles
-WHERE rolname IN ('avren_service', 'avren_owner')
+WHERE rolname IN ('avren_service', 'avren_owner', 'avren_migrator')
 ORDER BY rolname;
 
 SELECT
@@ -50,6 +50,9 @@ SELECT 'login_owner_role', rolname
 FROM pg_roles
 WHERE rolname = 'avren_owner' AND rolcanlogin
 UNION ALL
+SELECT 'migrator_cannot_set_owner', 'avren_migrator'
+WHERE NOT pg_has_role('avren_migrator', 'avren_owner', 'MEMBER')
+UNION ALL
 SELECT 'application_schema_wrong_owner', nspname
 FROM pg_namespace
 WHERE nspname IN (
@@ -70,16 +73,17 @@ SELECT 'definer_function_wrong_owner', n.nspname || '.' || p.proname
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE p.prosecdef
-  AND n.nspname IN ('auth','analytics')
+  AND n.nspname IN ('auth','analytics','compliance')
   AND pg_get_userbyid(p.proowner) <> 'avren_owner'
 UNION ALL
 SELECT 'required_function_not_executable', required.signature
 FROM (VALUES
   ('auth.find_user_for_login(text)'),
+  ('auth.get_mfa_secret_for_login(uuid)'),
   ('auth.list_active_tenant_ids()'),
   ('auth.create_session(uuid,text,inet,text,timestamp with time zone)'),
-  ('auth.revoke_session(text)'),
-  ('auth.is_session_active(text)'),
+  ('auth.revoke_session(uuid,text)'),
+  ('auth.is_session_active(uuid,text)'),
   ('analytics.refresh_aum_summary()'),
   ('compliance.fn_sync_kyc_alerts(uuid)')
 ) AS required(signature)
@@ -100,6 +104,22 @@ WHERE (n.nspname || '.' || c.relname) = ANY (ARRAY[
 ])
   AND has_table_privilege('avren_service', c.oid, 'SELECT')
 UNION ALL
+SELECT 'materialized_view_visible_to_app', n.nspname || '.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname IN (
+  'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+)
+  AND c.relkind = 'm'
+  AND has_table_privilege('avren_service', c.oid, 'SELECT')
+UNION ALL
+SELECT 'future_table_default_grant', n.nspname
+FROM pg_default_acl d
+LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
+CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
+WHERE d.defaclobjtype = 'r'
+  AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'avren_service')
+UNION ALL
 SELECT 'tenant_table_without_rls', n.nspname || '.' || c.relname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -110,6 +130,30 @@ WHERE n.nspname IN (
 )
   AND c.relkind = 'r'
   AND NOT c.relrowsecurity
+UNION ALL
+SELECT 'forced_table_without_select_policy', n.nspname || '.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relforcerowsecurity
+  AND n.nspname IN (
+    'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    WHERE p.polrelid = c.oid AND p.polcmd IN ('r','*')
+  )
+UNION ALL
+SELECT 'forced_table_without_write_policy', n.nspname || '.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relforcerowsecurity
+  AND n.nspname IN (
+    'ai','analytics','auth','community','compliance','crm','integrations','wealth'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_policy p
+    WHERE p.polrelid = c.oid AND p.polcmd IN ('a','w','d','*')
+  )
 UNION ALL
 SELECT 'forced_table_not_forced', n.nspname || '.' || c.relname
 FROM pg_class c

@@ -19,15 +19,24 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'avren_owner') THEN
     CREATE ROLE avren_owner NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'avren_migrator') THEN
+    CREATE ROLE avren_migrator LOGIN NOINHERIT
+      NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+  END IF;
 END
 $$;
 
+GRANT avren_owner TO avren_migrator;
+
 -- Funções SECURITY DEFINER pertencem à role sem login.
 ALTER FUNCTION auth.find_user_for_login(TEXT) OWNER TO avren_owner;
+ALTER FUNCTION auth.get_mfa_secret_for_login(UUID) OWNER TO avren_owner;
 ALTER FUNCTION auth.list_active_tenant_ids() OWNER TO avren_owner;
 ALTER FUNCTION auth.create_session(UUID,TEXT,INET,TEXT,TIMESTAMPTZ) OWNER TO avren_owner;
-ALTER FUNCTION auth.revoke_session(TEXT) OWNER TO avren_owner;
-ALTER FUNCTION auth.is_session_active(TEXT) OWNER TO avren_owner;
+ALTER FUNCTION auth.revoke_session(UUID,TEXT) OWNER TO avren_owner;
+ALTER FUNCTION auth.is_session_active(UUID,TEXT) OWNER TO avren_owner;
+ALTER FUNCTION analytics.refresh_aum_summary() OWNER TO avren_owner;
+ALTER FUNCTION compliance.fn_sync_kyc_alerts(UUID) OWNER TO avren_owner;
 
 -- Transfere os objetos atualmente pertencentes ao usuário da aplicação.
 REASSIGN OWNED BY avren_service TO avren_owner;
@@ -60,11 +69,12 @@ TO avren_service;
 -- Se as funções eram originalmente propriedade de avren_service, o GRANT
 -- feito na migration era implícito e desaparece ao trocar o owner.
 GRANT EXECUTE ON FUNCTION auth.find_user_for_login(TEXT) TO avren_service;
+GRANT EXECUTE ON FUNCTION auth.get_mfa_secret_for_login(UUID) TO avren_service;
 GRANT EXECUTE ON FUNCTION auth.list_active_tenant_ids() TO avren_service;
 GRANT EXECUTE ON FUNCTION auth.create_session(UUID,TEXT,INET,TEXT,TIMESTAMPTZ)
   TO avren_service;
-GRANT EXECUTE ON FUNCTION auth.revoke_session(TEXT) TO avren_service;
-GRANT EXECUTE ON FUNCTION auth.is_session_active(TEXT) TO avren_service;
+GRANT EXECUTE ON FUNCTION auth.revoke_session(UUID,TEXT) TO avren_service;
+GRANT EXECUTE ON FUNCTION auth.is_session_active(UUID,TEXT) TO avren_service;
 GRANT EXECUTE ON FUNCTION analytics.refresh_aum_summary() TO avren_service;
 GRANT EXECUTE ON FUNCTION compliance.fn_sync_kyc_alerts(UUID) TO avren_service;
 
@@ -90,9 +100,46 @@ FROM avren_service;
 GRANT SELECT ON wealth.aum_summary_tenant TO avren_service;
 GRANT SELECT ON analytics.banker_performance_tenant TO avren_service;
 
+-- Tabelas e views futuras não recebem acesso implícito. Cada migration deve
+-- declarar seus grants, evitando que uma nova matview global vaze dados.
 ALTER DEFAULT PRIVILEGES FOR ROLE avren_owner IN SCHEMA
   ai, analytics, auth, community, compliance, crm, integrations, wealth
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO avren_service;
+REVOKE ALL ON TABLES FROM avren_service;
+ALTER DEFAULT PRIVILEGES FOR ROLE avren_service IN SCHEMA
+  ai, analytics, auth, community, compliance, crm, integrations, wealth
+REVOKE ALL ON TABLES FROM avren_service;
+
+-- Remove também defaults históricos criados por outras roles de migration.
+DO $$
+DECLARE
+  item RECORD;
+BEGIN
+  FOR item IN
+    SELECT DISTINCT
+      owner.rolname AS owner_name,
+      n.nspname AS schema_name
+    FROM pg_default_acl d
+    JOIN pg_roles owner ON owner.oid = d.defaclrole
+    LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
+    CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
+    WHERE d.defaclobjtype = 'r'
+      AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = 'avren_service')
+  LOOP
+    IF item.schema_name IS NULL THEN
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES FOR ROLE %I REVOKE ALL ON TABLES FROM avren_service',
+        item.owner_name
+      );
+    ELSE
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM avren_service',
+        item.owner_name,
+        item.schema_name
+      );
+    END IF;
+  END LOOP;
+END
+$$;
 ALTER DEFAULT PRIVILEGES FOR ROLE avren_owner IN SCHEMA
   ai, analytics, auth, community, compliance, crm, integrations, wealth
 GRANT USAGE, SELECT ON SEQUENCES TO avren_service;

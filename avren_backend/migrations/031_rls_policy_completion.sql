@@ -336,8 +336,8 @@ BEGIN
   RETURN v_count;
 END;
 $$ LANGUAGE plpgsql
-SECURITY INVOKER
-SET search_path = pg_catalog, compliance;
+SECURITY DEFINER
+SET search_path = pg_catalog, compliance, pg_temp;
 
 REVOKE ALL ON FUNCTION compliance.fn_sync_kyc_alerts(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION compliance.fn_sync_kyc_alerts(UUID) TO avren_service;
@@ -362,7 +362,7 @@ CREATE OR REPLACE FUNCTION analytics.refresh_aum_summary()
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, wealth
+SET search_path = pg_catalog, wealth, pg_temp
 AS $$
 BEGIN
   REFRESH MATERIALIZED VIEW CONCURRENTLY wealth.aum_summary;

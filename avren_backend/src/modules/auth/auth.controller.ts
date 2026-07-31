@@ -22,9 +22,9 @@ export class AuthController {
   @HttpCode(204)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Invalida a sessão atual' })
-  async logout(@Req() req: FastifyRequest) {
+  async logout(@CurrentUser() user: JwtPayload, @Req() req: FastifyRequest) {
     const token = (req.headers.authorization ?? '').replace('Bearer ', '');
-    await this.authService.logout(token);
+    await this.authService.logout(user.sub, token);
   }
 
   @Get('me')
