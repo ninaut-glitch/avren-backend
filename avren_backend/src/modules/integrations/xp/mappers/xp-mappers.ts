@@ -148,6 +148,29 @@ export function sanitizeRawData(raw: unknown): Record<string, unknown> {
   return visit(raw) as Record<string, unknown>;
 }
 
+/**
+ * A dimensao Account mistura chaves tecnicas com numero de conta, perfil
+ * cadastral e patrimonio declarado. Para esse recurso usamos allowlist:
+ * campos novos da XP nao passam a ser persistidos automaticamente.
+ */
+const ACCOUNT_RAW_TECHNICAL_KEYS = new Set([
+  'dimAccountCode',
+  'startValidityDate',
+  'endValidityDate',
+  'currentRegisterIndicator',
+  'id',
+  'lastUpdate',
+  'availableData',
+]);
+
+export function sanitizeAccountRawData(
+  raw: XpRawAccount,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(raw).filter(([key]) => ACCOUNT_RAW_TECHNICAL_KEYS.has(key)),
+  );
+}
+
 // ── Implementacoes padrao ────────────────────────────────────
 
 export class DefaultAccountMapper implements XpMapper<XpRawAccount, XpAccountRow> {
@@ -164,7 +187,7 @@ export class DefaultAccountMapper implements XpMapper<XpRawAccount, XpAccountRow
       holder_name: null,
       advisor_code: null,
       status: raw.currentRegisterIndicator === 1 ? 'active' : 'inactive',
-      raw_data: sanitizeRawData(raw),
+      raw_data: sanitizeAccountRawData(raw),
     };
   }
 }
@@ -234,7 +257,9 @@ export class DefaultCommissionMapper implements XpMapper<XpRawCommission, XpComm
       external_account_id: raw.dimAccountCode == null ? null : String(raw.dimAccountCode),
       advisor_code: raw.dimAdvisorCode == null ? null : String(raw.dimAdvisorCode),
       product_code: raw.dimProductCode == null ? null : String(raw.dimProductCode),
-      gross_amount: numOr(raw.grossRevenueValue ?? raw.comissionValue, 0),
+      // Nao mistura comissionValue com receita bruta: sao metricas
+      // distintas no contrato oficial. Confirmar obrigatoriedade em HML.
+      gross_amount: numOr(raw.grossRevenueValue, 0),
       net_amount: numOr(raw.netRevenueValue, null),
       competence_date: competenceDate,
       raw_data: sanitizeRawData(raw),

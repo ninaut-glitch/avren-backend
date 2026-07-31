@@ -16,6 +16,7 @@ import {
   DefaultMovementMapper,
   DefaultPositionMapper,
   hashDocument,
+  sanitizeAccountRawData,
   sanitizeRawData,
 } from '../mappers/xp-mappers';
 
@@ -331,6 +332,21 @@ describe('XpHttpClient - nextLink', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('%24skip=2');
   });
 
+  it('encerra apos pagina cheia seguida de pagina vazia', async () => {
+    const { client } = makeClient({ XP_PAGE_SIZE: '2' });
+    const fetchMock = mockFetch([
+      { status: 200, json: { data: [{ i: 1 }, { i: 2 }] } },
+      { status: 200, json: { data: [] } },
+    ]);
+    const res = await client.paginate<{ i: number }>(
+      '/api/v1/inflow',
+      async () => undefined,
+    );
+
+    expect(res).toEqual({ pages: 2, records: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('recusa nextLink com HTTP (sem TLS)', async () => {
     const { client } = makeClient();
     mockFetch([
@@ -407,11 +423,15 @@ describe('mappers XP - privacidade', () => {
     });
   });
 
-  it('mapper de conta usa a chave dimensional e remove o GUID documental', () => {
+  it('mapper de conta persiste apenas chaves tecnicas no raw_data', () => {
     const row = new DefaultAccountMapper().map({
       dimAccountCode: 1001,
       accountCode: 123456,
       cpfCnpjCodeGuid: 'guid-sensivel',
+      incomeValue: 100000,
+      realStateValue: 500000,
+      maritalStatus: 'casado',
+      activity: 'empresario',
       currentRegisterIndicator: 1,
     });
 
@@ -420,9 +440,32 @@ describe('mappers XP - privacidade', () => {
     expect(row?.holder_document_hash).toBeNull();
     expect(row?.raw_data).toEqual({
       dimAccountCode: 1001,
-      accountCode: 123456,
       currentRegisterIndicator: 1,
     });
+    expect(row?.raw_data).not.toHaveProperty('accountCode');
+    expect(row?.raw_data).not.toHaveProperty('incomeValue');
+    expect(row?.raw_data).not.toHaveProperty('realStateValue');
+  });
+
+  it('allowlist de conta preserva dimAccountCode e ignora campos novos', () => {
+    expect(
+      sanitizeAccountRawData({
+        dimAccountCode: 44,
+        accountCode: 998877,
+        currentRegisterIndicator: 0,
+        campoNovoSensivel: 'nao deve persistir',
+      }),
+    ).toEqual({ dimAccountCode: 44, currentRegisterIndicator: 0 });
+  });
+
+  it('documenta registro nao vigente como inativo', () => {
+    expect(
+      new DefaultAccountMapper().map({
+        dimAccountCode: 1002,
+        accountCode: 654321,
+        currentRegisterIndicator: 0,
+      })?.status,
+    ).toBe('inactive');
   });
 
   it('mapeia custodia, captacao e comissao do contrato oficial', () => {

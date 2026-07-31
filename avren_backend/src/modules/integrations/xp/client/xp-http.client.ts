@@ -74,7 +74,7 @@ function boundedNumber(
  *   - redirect: 'error' em toda chamada: redirecionamentos nunca sao
  *     seguidos (nosso mTLS nao apresenta certificado a terceiros).
  *   - Limites validados com faixas seguras: timeout 1s..120s, retries
- *     0..5, RPS 1..50, pageSize 1..500. Valor fora da faixa e ERRO
+ *     0..5, RPS 1..50, pageSize 1..50.000. Valor fora da faixa e ERRO
  *     explicito, nao ajuste silencioso.
  * Guardas previos (nesta ordem): flag desligada, mTLS ausente,
  * Subscription Key ausente. Sanitizacao de erros por construcao.

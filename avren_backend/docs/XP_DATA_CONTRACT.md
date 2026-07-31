@@ -62,6 +62,37 @@ permanece desligada e os mapeamentos devem ser confirmados com payloads de HML.
 O cálculo legado que soma todas as movimentações não deve ser usado como
 captação líquida quando o Positivador estiver disponível.
 
+## Decisões pendentes de homologação
+
+- Confirmar se `dimAccountCode` é estável por conta ou muda a cada versão da
+  dimensão. Se mudar, ingerir apenas `currentRegisterIndicator = 1` ou definir
+  deduplicação sem usar o número bruto da conta.
+- Criar um mapa explícito entre `tableName` do Log de Reprocessamento e as
+  chaves internas: `auc -> positions`, `inflow -> movements`,
+  `commission -> commissions` e `account -> accounts`.
+- Movimentações ainda usam inserção idempotente. Antes de implementar a rebusca
+  do Log de Reprocessamento, definir correção por upsert ou por substituição do
+  intervalo de referência.
+- `grossRevenueValue` e `comissionValue` são métricas distintas. O AVREN grava
+  somente `grossRevenueValue` como receita bruta; não há fallback semântico.
+- Confirmar se todos os endpoints OData aceitam `$top` e `$skip` na primeira
+  chamada. O cliente também suporta `@odata.nextLink` quando fornecido.
+
+## Privacidade da dimensão Account
+
+O número `accountCode` existe apenas para produzir `account_number_mask` e não
+é persistido em `raw_data`. A dimensão mistura perfil cadastral e patrimônio
+declarado, portanto seu `raw_data` usa allowlist e conserva somente:
+
+- `dimAccountCode`;
+- datas de início e fim de vigência;
+- indicador de registro vigente;
+- identificador técnico;
+- última atualização;
+- indicador de disponibilidade.
+
+Campos novos enviados pela XP ficam fora do banco até revisão explícita.
+
 ## Paginação
 
 O cliente aceita os dois envelopes observados:
