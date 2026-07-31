@@ -105,6 +105,13 @@ function numOr<T>(v: unknown, fallback: T): number | T {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function dimDate(value: unknown): string | null {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (digits.length !== 8) return null;
+  const date = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+  return Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ? null : date;
+}
+
 const SENSITIVE_RAW_KEYS = [
   'cpf',
   'cnpj',
@@ -145,17 +152,18 @@ export function sanitizeRawData(raw: unknown): Record<string, unknown> {
 
 export class DefaultAccountMapper implements XpMapper<XpRawAccount, XpAccountRow> {
   readonly resource = 'accounts';
-  constructor(private readonly documentPepper: string) {}
 
   map(raw: XpRawAccount): XpAccountRow | null {
-    if (!raw?.accountId) return null;
+    if (raw?.dimAccountCode === undefined || raw?.dimAccountCode === null) return null;
     return {
-      external_account_id: String(raw.accountId),
-      account_number_mask: maskAccountNumber(raw.accountNumber),
-      holder_document_hash: hashDocument(raw.holderDocument, this.documentPepper),
-      holder_name: raw.holderName ?? null,
-      advisor_code: raw.advisorCode ?? null,
-      status: raw.status ?? null,
+      external_account_id: String(raw.dimAccountCode),
+      account_number_mask: maskAccountNumber(String(raw.accountCode ?? '')),
+      // A API oficial entrega um GUID, nao o CPF/CNPJ bruto. Nao e
+      // possivel nem necessario gerar HMAC desse identificador.
+      holder_document_hash: null,
+      holder_name: null,
+      advisor_code: null,
+      status: raw.currentRegisterIndicator === 1 ? 'active' : 'inactive',
       raw_data: sanitizeRawData(raw),
     };
   }
@@ -164,24 +172,29 @@ export class DefaultAccountMapper implements XpMapper<XpRawAccount, XpAccountRow
 export class DefaultPositionMapper implements XpMapper<XpRawPosition, XpPositionRow> {
   readonly resource = 'positions';
   map(raw: XpRawPosition): XpPositionRow | null {
-    if (!raw?.positionId || !raw?.accountId || !raw?.asOfDate) return null;
-    if (!raw.productName || !raw.assetClass) return null; // NOT NULL na 018
+    const asOfDate = dimDate(raw?.dimTimeCode);
+    if (raw?.id === undefined || raw?.dimAccountCode === undefined || !asOfDate) return null;
+    if (raw.dimProductCode === undefined || raw.dimProductCode === null) return null;
+    const productCode = String(raw.dimProductCode);
     return {
-      external_position_id: String(raw.positionId),
-      external_account_id: String(raw.accountId),
-      asset_class: raw.assetClass,
-      product_code: raw.productCode ?? null,
-      product_name: raw.productName,
-      symbol: raw.symbol ?? null,
-      issuer_name: raw.issuerName ?? null,
-      quantity: numOr(raw.quantity, null),
-      unit_price: numOr(raw.unitPrice, null),
-      gross_value: numOr(raw.grossValue, 0),
-      net_value: numOr(raw.netValue, null),
-      invested_value: numOr(raw.investedValue, null),
-      currency: (raw.currency ?? 'BRL').slice(0, 3),
-      maturity_date: raw.maturityDate ?? null,
-      as_of_date: raw.asOfDate,
+      external_position_id: String(raw.id),
+      external_account_id: String(raw.dimAccountCode),
+      // Nome, classe e emissor serao enriquecidos pela dimensao Produto
+      // na fase 2. Estes valores deixam a custodia identificavel sem
+      // inventar classificacoes de investimento.
+      asset_class: 'Nao classificado',
+      product_code: productCode,
+      product_name: `Produto XP ${productCode}`,
+      symbol: null,
+      issuer_name: null,
+      quantity: numOr(raw.positionAmount, null),
+      unit_price: null,
+      gross_value: numOr(raw.positionValue, 0),
+      net_value: null,
+      invested_value: null,
+      currency: 'BRL',
+      maturity_date: raw.termDueDate ?? null,
+      as_of_date: asOfDate,
       raw_data: sanitizeRawData(raw),
     };
   }
@@ -190,19 +203,22 @@ export class DefaultPositionMapper implements XpMapper<XpRawPosition, XpPosition
 export class DefaultMovementMapper implements XpMapper<XpRawMovement, XpMovementRow> {
   readonly resource = 'movements';
   map(raw: XpRawMovement): XpMovementRow | null {
-    if (!raw?.movementId || !raw?.accountId || !raw?.occurredAt) return null;
+    const occurredDate = dimDate(raw?.dimTimeCode);
+    if (raw?.id === undefined || raw?.dimAccountCode === undefined || !occurredDate) return null;
     return {
-      external_movement_id: String(raw.movementId),
-      external_account_id: String(raw.accountId),
-      position_external_id: raw.positionId ?? null,
-      movement_type: raw.movementType ?? null,
-      transaction_type: raw.transactionType ?? null,
-      product_code: raw.productCode ?? null,
-      product_name: raw.productName ?? null,
-      amount: numOr(raw.amount, 0),
-      quantity: numOr(raw.quantity, null),
-      currency: (raw.currency ?? 'BRL').slice(0, 3),
-      occurred_at: raw.occurredAt,
+      external_movement_id: String(raw.id),
+      external_account_id: String(raw.dimAccountCode),
+      position_external_id: null,
+      movement_type: raw.dimMovementTypeCode == null
+        ? null
+        : String(raw.dimMovementTypeCode),
+      transaction_type: raw.movementNatureCode ?? null,
+      product_code: raw.dimProductCode == null ? null : String(raw.dimProductCode),
+      product_name: null,
+      amount: numOr(raw.movementValue, 0),
+      quantity: numOr(raw.movementAmount, null),
+      currency: 'BRL',
+      occurred_at: `${occurredDate}T00:00:00Z`,
       raw_data: sanitizeRawData(raw),
     };
   }
@@ -211,15 +227,16 @@ export class DefaultMovementMapper implements XpMapper<XpRawMovement, XpMovement
 export class DefaultCommissionMapper implements XpMapper<XpRawCommission, XpCommissionRow> {
   readonly resource = 'commissions';
   map(raw: XpRawCommission): XpCommissionRow | null {
-    if (!raw?.commissionId || !raw?.competenceDate) return null;
+    const competenceDate = dimDate(raw?.dimTimeCode);
+    if (raw?.id === undefined || !competenceDate) return null;
     return {
-      external_commission_id: String(raw.commissionId),
-      external_account_id: raw.accountId ? String(raw.accountId) : null,
-      advisor_code: raw.advisorCode ?? null,
-      product_code: raw.productCode ?? null,
-      gross_amount: numOr(raw.grossAmount, 0),
-      net_amount: numOr(raw.netAmount, null),
-      competence_date: raw.competenceDate,
+      external_commission_id: String(raw.id),
+      external_account_id: raw.dimAccountCode == null ? null : String(raw.dimAccountCode),
+      advisor_code: raw.dimAdvisorCode == null ? null : String(raw.dimAdvisorCode),
+      product_code: raw.dimProductCode == null ? null : String(raw.dimProductCode),
+      gross_amount: numOr(raw.grossRevenueValue ?? raw.comissionValue, 0),
+      net_amount: numOr(raw.netRevenueValue, null),
+      competence_date: competenceDate,
       raw_data: sanitizeRawData(raw),
     };
   }
@@ -234,58 +251,52 @@ export const FIXTURES = {
 
   accounts: [
     {
-      accountId: 'FIC-0001',
-      accountNumber: '000123456',
-      holderName: 'Cliente Ficticio Um',
-      holderDocument: '000.000.001-91',
-      advisorCode: 'A001',
-      status: 'active',
+      dimAccountCode: 10000001,
+      accountCode: 123456,
+      cpfCnpjCodeGuid: 'guid-ficticio-1',
+      currentRegisterIndicator: 1,
     },
     {
-      accountId: 'FIC-0002',
-      accountNumber: '000765432',
-      holderName: 'Cliente Ficticio Dois',
-      holderDocument: '000.000.002-72',
-      advisorCode: 'A001',
-      status: 'active',
+      dimAccountCode: 10000002,
+      accountCode: 765432,
+      cpfCnpjCodeGuid: 'guid-ficticio-2',
+      currentRegisterIndicator: 1,
     },
   ] as XpRawAccount[],
 
   positions: [
     {
-      positionId: 'POS-0001',
-      accountId: 'FIC-0001',
-      asOfDate: '2026-07-28',
-      assetClass: 'Renda Fixa',
-      productName: 'NTN-B Ficticia 2035',
-      quantity: 100,
-      unitPrice: 4500,
-      grossValue: 450000,
-      netValue: 448200,
-      currency: 'BRL',
+      id: 900001,
+      dimAccountCode: 10000001,
+      dimTimeCode: 20260728,
+      dimProductCode: 30001,
+      positionAmount: 100,
+      positionValue: 450000,
+      termDueDate: '2035-05-15T00:00:00',
     },
   ] as XpRawPosition[],
 
   movements: [
     {
-      movementId: 'MOV-0001',
-      accountId: 'FIC-0001',
-      occurredAt: '2026-07-27T14:00:00Z',
-      movementType: 'aporte',
-      amount: 50000,
-      currency: 'BRL',
+      id: 800001,
+      movementCode: 70001,
+      dimAccountCode: 10000001,
+      dimTimeCode: 20260727,
+      dimMovementTypeCode: 1,
+      movementNatureCode: 'C',
+      movementValue: 50000,
     },
   ] as XpRawMovement[],
 
   commissions: [
     {
-      commissionId: 'COM-0001',
-      accountId: 'FIC-0001',
-      competenceDate: '2026-07-01',
-      advisorCode: 'A001',
-      productCode: 'RF',
-      grossAmount: 1200.5,
-      netAmount: 600.25,
+      id: 600001,
+      dimAccountCode: 10000001,
+      dimTimeCode: 20260701,
+      dimAdvisorCode: 2001,
+      dimProductCode: 30001,
+      grossRevenueValue: 1200.5,
+      netRevenueValue: 600.25,
     },
   ] as XpRawCommission[],
 } as const;

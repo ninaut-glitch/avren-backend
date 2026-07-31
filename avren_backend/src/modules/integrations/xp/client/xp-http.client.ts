@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { XpTransport } from './xp-transport';
 import { XpTokenProvider } from './xp-token.provider';
-import { ODataPage } from '../resources/xp-resource.types';
+import { XpDataPage, pageItems } from '../resources/xp-resource.types';
 
 export interface XpRequestOptions {
   method?: 'GET' | 'POST';
@@ -106,7 +106,7 @@ export class XpHttpClient {
         this.config.get('XP_RATE_LIMIT_RPS'), 'XP_RATE_LIMIT_RPS', 1, 50, 5,
       ),
       pageSize: boundedNumber(
-        this.config.get('XP_PAGE_SIZE'), 'XP_PAGE_SIZE', 1, 500, 200,
+        this.config.get('XP_PAGE_SIZE'), 'XP_PAGE_SIZE', 1, 50_000, 10_000,
       ),
     };
   }
@@ -160,7 +160,8 @@ export class XpHttpClient {
 
     const { timeoutMs, maxRetries, rps } = this.limits();
     if (!this.limiter) this.limiter = new RateLimiter(rps);
-    const userAgent = this.config.get<string>('XP_USER_AGENT') ?? 'AVREN-OS/1.0';
+    const userAgent =
+      this.config.get<string>('XP_USER_AGENT') ?? 'XPparceiroDataAccess/AVREN';
 
     const url = this.resolveUrl(pathOrUrl);
     for (const [k, v] of Object.entries(opts.query ?? {})) {
@@ -249,9 +250,9 @@ export class XpHttpClient {
   }
 
   /**
-   * Paginacao dirigida por @odata.nextLink devolvido pelo servidor
-   * ($top somente na primeira chamada; nextLink carrega o cursor,
-   * inclusive $skiptoken). Ausencia de nextLink encerra.
+   * Aceita os dois contratos documentados pela XP:
+   *   - OData com value + @odata.nextLink;
+   *   - data + paginacao por $skip/$top.
    */
   async paginate<T>(
     path: string,
@@ -265,18 +266,26 @@ export class XpHttpClient {
     let page = 0;
     let records = 0;
     let next: string | null = path;
-    let firstQuery: XpRequestOptions['query'] = { ...opts.query, $top: pageSize };
+    let query: XpRequestOptions['query'] = { ...opts.query, $top: pageSize, $skip: 0 };
 
     while (next && page < maxPages) {
-      const data: ODataPage<T> = await this.request<ODataPage<T>>(next, {
-        query: firstQuery,
+      const data: XpDataPage<T> = await this.request<XpDataPage<T>>(next, {
+        query,
       });
-      firstQuery = undefined;
-      const items = data.value ?? [];
+      const items = pageItems(data);
       page++;
       records += items.length;
       await onPage(items, page);
-      next = (data['@odata.nextLink'] as string | undefined) ?? null;
+      const nextLink = data['@odata.nextLink'] as string | undefined;
+      if (nextLink) {
+        next = nextLink;
+        query = undefined;
+      } else if (items.length === pageSize) {
+        next = path;
+        query = { ...opts.query, $top: pageSize, $skip: page * pageSize };
+      } else {
+        next = null;
+      }
     }
 
     if (next && page >= maxPages) {

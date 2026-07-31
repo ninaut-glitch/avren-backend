@@ -186,10 +186,6 @@ d('Integracao XP - banco real', () => {
       sql,
       httpNever(),
       new XpSyncLock(sql),
-      {
-        get: (key: string) =>
-          key === 'XP_DOCUMENT_PEPPER' ? 'pepper-ficticio-exclusivo-de-teste' : undefined,
-      } as any,
     );
     reconciliation = new XpReconciliationService(sql);
   });

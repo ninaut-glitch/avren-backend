@@ -1,99 +1,147 @@
 /**
- * Interfaces dos recursos da Data Access API.
+ * Contratos publicados no portal XP Data Access em 31/07/2026.
  *
- * ATENCAO: estruturas PROVISORIAS ate os payloads de homologacao.
- * Todo recurso carrega [key: string]: unknown para os mappers nao
- * quebrarem com campos desconhecidos.
- *
- * Quando os payloads reais chegarem, apenas tres pontos mudam:
- *   1. Estes tipos.
- *   2. Os fixtures em ../mappers/xp-mappers.ts.
- *   3. Os mappers correspondentes.
- * Motor, client, conciliacao e telas nao mudam.
+ * Os exemplos oficiais usam `data`; `value` e `@odata.nextLink` continuam
+ * aceitos para compatibilidade com implementacoes OData do gateway.
+ * Campos adicionais sao preservados para tolerar evolucao aditiva da API.
  */
-
-export interface ODataPage<T> {
-  value: T[];
+export interface XpDataPage<T> {
+  data?: T[];
+  value?: T[];
   '@odata.count'?: number;
   '@odata.nextLink'?: string;
   [key: string]: unknown;
 }
 
-/**
- * Reprocessing Log: consulta OBRIGATORIA antes de qualquer outro
- * recurso em cada sincronizacao.
- */
+export function pageItems<T>(page: XpDataPage<T>): T[] {
+  if (Array.isArray(page.data)) return page.data;
+  if (Array.isArray(page.value)) return page.value;
+  return [];
+}
+
 export interface XpReprocessingLogEntry {
-  resource: string;
+  tableName: string;
   referenceDate: string;
-  reprocessedAt: string;
+  typeProcessing: 'INCREMENTAL' | 'FULL' | string;
+  minimumProcessingDate: string;
+  maximumProcessingDate: string;
   [key: string]: unknown;
 }
 
+/** Dimensao Account: /api/v1/account, atualizacao D-1. */
 export interface XpRawAccount {
-  /** Identificador externo da conta na XP (vira external_account_id). */
-  accountId: string;
-  accountNumber?: string;
-  holderName?: string;
-  /** Documento do titular; NUNCA e persistido bruto (vira hash + mascara). */
-  holderDocument?: string;
-  advisorCode?: string;
-  status?: string;
+  dimAccountCode: number | string;
+  accountCode: number | string;
+  cpfCnpjCodeGuid?: string;
+  birthYear?: number;
+  birthMonth?: number;
+  registerDate?: string;
+  personType?: string;
+  maritalStatus?: string;
+  activity?: string;
+  dscSuitability?: string;
+  realStateValue?: number;
+  movableAssetsValue?: number;
+  incomeValue?: number;
+  financialApplicationsValue?: number;
+  othersValue?: number;
+  qualifiedInvestorTerm?: string;
+  professionalTerm?: string;
+  startValidityDate?: string;
+  endValidityDate?: string;
+  currentRegisterIndicator?: number;
+  id?: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
   [key: string]: unknown;
 }
 
+/** Fato AUC/Custodia: /api/v1/auc, atualizacao D-1. */
 export interface XpRawPosition {
-  positionId: string;
-  accountId: string;
-  asOfDate: string;
-  assetClass?: string;
-  productCode?: string;
-  productName?: string;
-  symbol?: string;
-  issuerName?: string;
-  quantity?: number;
-  unitPrice?: number;
-  grossValue?: number;
-  netValue?: number;
-  investedValue?: number;
-  currency?: string;
-  maturityDate?: string;
+  dimAccountCode: number | string;
+  dimTimeCode: number | string;
+  dimOfficeChannelCode?: number | string;
+  dimAdvisorCode?: number | string;
+  dimProductCode: number | string;
+  positionAmount?: number;
+  positionValue?: number;
+  termDueDate?: string;
+  year?: number;
+  month?: number;
+  day?: number;
+  id: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
   [key: string]: unknown;
 }
 
+/** Fato Inflow/Captacao: /api/v1/inflow, atualizacao D-1. */
 export interface XpRawMovement {
-  movementId: string;
-  accountId: string;
-  occurredAt: string;
-  positionId?: string;
-  movementType?: string;
-  transactionType?: string;
-  productCode?: string;
-  productName?: string;
-  amount?: number;
-  quantity?: number;
-  currency?: string;
+  movementCode?: number | string;
+  dimProductCode?: number | string;
+  dimTimeCode: number | string;
+  dimFinancialInstitutionalCode?: number | string;
+  dimOfficeChannelCode?: number | string;
+  dimAccountCode: number | string;
+  dimMovementTypeCode?: number | string;
+  movementNatureCode?: string;
+  dimAdvisorCode?: number | string;
+  movementAmount?: number;
+  movementValue?: number;
+  year?: number;
+  month?: number;
+  day?: number;
+  id: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
   [key: string]: unknown;
 }
 
+/** Fato Commission: /api/v1/commission, fechamento mensal D-1. */
 export interface XpRawCommission {
-  commissionId: string;
-  accountId?: string;
-  competenceDate: string;
-  advisorCode?: string;
-  productCode?: string;
-  grossAmount?: number;
-  netAmount?: number;
+  dimTimeCode: number | string;
+  dimProductCode?: number | string;
+  dimAccountCode?: number | string;
+  assetAmount?: number;
+  origin?: string;
+  comissionValue?: number;
+  dimAdvisorCode?: number | string;
+  dimOfficeChannelCode?: number | string;
+  grossRevenueValue?: number;
+  netRevenueValue?: number;
+  percentageComissionValue?: number;
+  companyCategory?: string;
+  productComission?: string;
+  roaAccounting?: number;
+  id: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
   [key: string]: unknown;
 }
 
-/** Paths PROVISORIOS; confirmar na documentacao credenciada. */
+/**
+ * Recursos da fase 1 que ja possuem persistencia na migration 018.
+ * Os nomes internos permanecem estaveis; os paths sao os oficiais.
+ */
 export const XP_RESOURCE_PATHS = {
-  reprocessing_log: '/reprocessing-log',
-  accounts: '/accounts',
-  positions: '/positions',
-  movements: '/movements',
-  commissions: '/commissions',
+  reprocessing_log: '/api/v1/reprocessing-log',
+  accounts: '/api/v1/account',
+  positions: '/api/v1/auc',
+  movements: '/api/v1/inflow',
+  commissions: '/api/v1/commission',
 } as const;
 
-export type XpResourceKey = keyof typeof XP_RESOURCE_PATHS;
+/** Endpoints oficiais mapeados para a proxima fase, ainda sem persistencia. */
+export const XP_PHASE_TWO_PATHS = {
+  account_advisor_relation: '/api/v1/account-advisor-relation',
+  products: '/api/v1/product-partner',
+  positivador: '/api/v1/positivador',
+  consolidated_positions: '/api/v1/consolidated-positions/customer/{customerCode}',
+  wealth_evolution: '/api/v1/wealth-evolution/customer/{customerCode}',
+  investment_statement: '/api/v1/investment-account/statement/customer/{customerCode}',
+  investment_balance: '/api/v1/investment-account/balance/customer/{customerCode}',
+  digital_balance: '/api/v1/digital-account/balance/customer/{customerCode}',
+  operations: '/api/v2/operations/customers/{customerCode}',
+} as const;
+
+export type XpResourceKey = Exclude<keyof typeof XP_RESOURCE_PATHS, 'reprocessing_log'>;
