@@ -11,14 +11,19 @@ import { InMemoryTokenStore, XpTokenProvider } from '../client/xp-token.provider
 import { XpApiError, XpHttpClient } from '../client/xp-http.client';
 import { planReprocessing } from '../sync/xp-sync.service';
 import {
+  DefaultAccountAdvisorRelationMapper,
   DefaultAccountMapper,
   DefaultCommissionMapper,
   DefaultMovementMapper,
   DefaultPositionMapper,
+  DefaultPositivadorMapper,
+  DefaultProductMapper,
+  hashAccountCode,
   hashDocument,
   sanitizeAccountRawData,
   sanitizeRawData,
 } from '../mappers/xp-mappers';
+import { REPROCESS_TABLE_MAP } from '../resources/xp-resource.types';
 
 function cfg(values: Record<string, string>) {
   return { get: (k: string) => values[k] } as unknown as ConfigService;
@@ -380,7 +385,7 @@ describe('XpHttpClient - nextLink', () => {
 // ── Contrato de reprocessamento ───────────────────────────────
 
 describe('planReprocessing (contrato, requisito 8)', () => {
-  it('deriva o plano do log e descarta entradas incompletas', () => {
+  it('mapeia tableName oficial para o recurso interno e descarta entradas incompletas', () => {
     const plan = planReprocessing([
       {
         tableName: 'auc', referenceDate: '2026-07-25', typeProcessing: 'FULL',
@@ -389,8 +394,33 @@ describe('planReprocessing (contrato, requisito 8)', () => {
       { tableName: '', referenceDate: '2026-07-26' } as any,
     ]);
     expect(plan.entries).toEqual([
-      { resource: 'auc', referenceDate: '2026-07-25' },
+      { tableName: 'auc', resource: 'positions', referenceDate: '2026-07-25' },
     ]);
+  });
+
+  it('nao adivinha tableName desconhecido: mantem o nome e resource null', () => {
+    const plan = planReprocessing([
+      {
+        tableName: 'tabela-misteriosa', referenceDate: '2026-07-25',
+        typeProcessing: 'INCREMENTAL',
+        minimumProcessingDate: '2026-07-25', maximumProcessingDate: '2026-07-25',
+      },
+    ]);
+    expect(plan.entries).toEqual([
+      { tableName: 'tabela-misteriosa', resource: null, referenceDate: '2026-07-25' },
+    ]);
+  });
+
+  it('cobre o mapa oficial completo da Etapa B', () => {
+    expect(REPROCESS_TABLE_MAP).toEqual({
+      account: 'accounts',
+      'account-advisor-relation': 'account_advisor_relations',
+      'product-partner': 'products',
+      auc: 'positions',
+      inflow: 'movements',
+      commission: 'commissions',
+      positivador: 'positivador',
+    });
   });
 });
 
@@ -498,5 +528,157 @@ describe('mappers XP - privacidade', () => {
       advisor_code: '3003', gross_amount: 900, net_amount: 450,
       competence_date: '2026-07-01',
     });
+  });
+});
+
+describe('Etapa B - hash de conta e vinculo pseudonimizado', () => {
+  const PEPPER = 'pepper-de-teste-exclusivo';
+
+  it('produz o MESMO hash em Account e Positivador para a mesma conta', () => {
+    const account = new DefaultAccountMapper(PEPPER).map({
+      dimAccountCode: 1001, accountCode: 123456, currentRegisterIndicator: 1,
+    });
+    const positivador = new DefaultPositivadorMapper(PEPPER).map({
+      id: 1, accountCode: 123456, positionDate: '2026-07-01',
+    });
+    expect(account!.account_code_hash).toEqual(expect.any(String));
+    expect(account!.account_code_hash).toBe(positivador!.account_code_hash);
+    // normalizacao por digitos: '123456' e 123456 geram o mesmo hash
+    expect(hashAccountCode('123456', PEPPER)).toBe(account!.account_code_hash);
+  });
+
+  it('pepper ausente => hash null (vinculo pendente), sem lancar e sem vazar', () => {
+    const account = new DefaultAccountMapper('').map({
+      dimAccountCode: 1001, accountCode: 123456, currentRegisterIndicator: 1,
+    });
+    const positivador = new DefaultPositivadorMapper('').map({
+      id: 1, accountCode: 123456, positionDate: '2026-07-01',
+    });
+    expect(account!.account_code_hash).toBeNull();
+    expect(positivador!.account_code_hash).toBeNull();
+    // nenhum campo do objeto persistido carrega o numero bruto
+    expect(JSON.stringify(account)).not.toContain('123456');
+    expect(JSON.stringify(positivador)).not.toContain('123456');
+  });
+
+  it('hash nunca e o numero bruto nem o contem', () => {
+    const hash = hashAccountCode(987654, PEPPER);
+    expect(hash).toHaveLength(64);
+    expect(hash).not.toContain('987654');
+  });
+});
+
+describe('Etapa B - allowlist do Positivador', () => {
+  it('descarta campos pessoais e desconhecidos; persiste apenas colunas aprovadas', () => {
+    const row = new DefaultPositivadorMapper('p').map({
+      id: 400001,
+      accountCode: 123456,
+      advisorCode: 2001,
+      segment: 'Private',
+      grossCaptureInMonth: 100000,
+      redemptionInMonth: 25000,
+      netCaptureInMonth: 75000,
+      positionDate: '2026-07-01T00:00:00',
+      // proibidos e desconhecidos, presentes de proposito:
+      birthday: '1990-01-01',
+      gender: 'X',
+      activity: 'Engenheira',
+      maritalStatus: 'Casada',
+      registerDate: '2019-01-01',
+      qualifiedInvestorTern: 'S',
+      campoNovoDesconhecido: 'nao deve persistir',
+    } as any);
+
+    expect(row).not.toBeNull();
+    const serialized = JSON.stringify(row);
+    for (const banned of [
+      'birthday', '1990-01-01', 'gender', 'activity', 'Engenheira',
+      'maritalStatus', 'Casada', 'registerDate', 'campoNovoDesconhecido',
+      '123456',
+    ]) {
+      expect(serialized).not.toContain(banned);
+    }
+    expect(row).toMatchObject({
+      external_positivador_id: '400001',
+      advisor_code: '2001',
+      segment: 'Private',
+      gross_capture_in_month: 100000,
+      redemption_in_month: 25000,
+      net_capture_in_month: 75000,
+      position_date: '2026-07-01',
+    });
+    // objeto NAO possui raw_data: as colunas sao a allowlist
+    expect('raw_data' in (row as any)).toBe(false);
+  });
+
+  it('sem positionDate valida => descarte controlado', () => {
+    const mapper = new DefaultPositivadorMapper('p');
+    expect(mapper.map({ id: 1, accountCode: 1 } as any)).toBeNull();
+    expect(mapper.map({ id: 1, accountCode: 1, positionDate: 'data-invalida' } as any)).toBeNull();
+  });
+});
+
+describe('Etapa B - data deterministica da relacao conta-assessor', () => {
+  const mapper = new DefaultAccountAdvisorRelationMapper();
+
+  it('usa referenceDate oficial, depois startValidityDate, depois lastUpdate', () => {
+    expect(
+      mapper.map({
+        id: 1, dimAccountCode: 1001, referenceDate: '2026-05-10',
+        startValidityDate: '2026-01-02', lastUpdate: '2026-07-28T03:00:00',
+      })!.reference_date,
+    ).toBe('2026-05-10');
+    expect(
+      mapper.map({
+        id: 2, dimAccountCode: 1001,
+        startValidityDate: '2026-01-02T00:00:00', lastUpdate: '2026-07-28T03:00:00',
+      })!.reference_date,
+    ).toBe('2026-01-02');
+    expect(
+      mapper.map({
+        id: 3, dimAccountCode: 1001, lastUpdate: '2026-07-28T03:00:00',
+      })!.reference_date,
+    ).toBe('2026-07-28');
+  });
+
+  it('sem data confiavel => descarte controlado, NUNCA a data corrente', () => {
+    const row = mapper.map({ id: 4, dimAccountCode: 1001 });
+    expect(row).toBeNull();
+  });
+
+  it('e deterministico: duas execucoes identicas produzem o mesmo resultado', () => {
+    const raw = { id: 5, dimAccountCode: 1001, startValidityDate: '2026-03-01' };
+    expect(mapper.map({ ...raw })).toEqual(mapper.map({ ...raw }));
+  });
+});
+
+describe('Etapa B - mapper de produtos', () => {
+  it('preserva a grafia oficial de entrada e normaliza as colunas internas', () => {
+    const row = new DefaultProductMapper().map({
+      dimProductCode: 30001,
+      assetCode: 'ABC11',
+      assetName: 'Produto Teste',
+      issuerName: 'Emissor S.A.',
+      productClassficationL0: 'Renda Fixa',
+      productClassficationL1: 'Bancario',
+      yield: 'CDI + 2%',
+      index: 'CDI',
+      dueDate: '2035-05-15T00:00:00',
+      currentRegister: 1,
+    });
+    expect(row).toMatchObject({
+      external_product_id: '30001',
+      product_name: 'Produto Teste',
+      classification_l0: 'Renda Fixa',
+      classification_l1: 'Bancario',
+      yield_description: 'CDI + 2%',
+      index_name: 'CDI',
+      due_date: '2035-05-15',
+      current_register: true,
+    });
+  });
+
+  it('sem dimProductCode => descarte controlado', () => {
+    expect(new DefaultProductMapper().map({} as any)).toBeNull();
   });
 });

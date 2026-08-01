@@ -6,6 +6,7 @@ import { withTenantRls } from './xp-rls';
 import { XpSyncLock } from './xp-lock';
 import { XpApiError, XpHttpClient } from '../client/xp-http.client';
 import {
+  REPROCESS_TABLE_MAP,
   XP_RESOURCE_PATHS,
   XpDataPage,
   XpReprocessingLogEntry,
@@ -13,16 +14,22 @@ import {
   pageItems,
 } from '../resources/xp-resource.types';
 import {
+  DefaultAccountAdvisorRelationMapper,
   DefaultAccountMapper,
   DefaultCommissionMapper,
   DefaultMovementMapper,
   DefaultPositionMapper,
+  DefaultPositivadorMapper,
+  DefaultProductMapper,
   FIXTURES,
+  XpAccountAdvisorRelationRow,
   XpAccountRow,
   XpCommissionRow,
   XpMapper,
   XpMovementRow,
   XpPositionRow,
+  XpPositivadorRow,
+  XpProductRow,
 } from '../mappers/xp-mappers';
 
 export interface SyncOptions {
@@ -52,7 +59,13 @@ export interface SyncRunResult {
  * termina 'partial' com aviso explicito, nunca fingindo sucesso.
  */
 export interface ReprocessPlan {
-  entries: Array<{ resource: string; referenceDate: string }>;
+  entries: Array<{
+    /** tableName oficial do Log de Reprocessamento. */
+    tableName: string;
+    /** Recurso interno mapeado; null quando o tableName e desconhecido. */
+    resource: XpResourceKey | null;
+    referenceDate: string;
+  }>;
 }
 
 export function planReprocessing(
@@ -61,7 +74,13 @@ export function planReprocessing(
   return {
     entries: entries
       .filter((e) => e?.tableName && e?.referenceDate)
-      .map((e) => ({ resource: e.tableName, referenceDate: e.referenceDate })),
+      .map((e) => ({
+        tableName: e.tableName,
+        // Mapa oficial tableName -> recurso interno. Nomes desconhecidos
+        // NAO sao adivinhados: ficam sem mapeamento e geram aviso.
+        resource: REPROCESS_TABLE_MAP[e.tableName] ?? null,
+        referenceDate: e.referenceDate,
+      })),
   };
 }
 
@@ -78,11 +97,19 @@ class DryRunRollback extends Error {
 type PipelineBody = Omit<SyncRunResult, 'runId' | 'auditPersisted'>;
 type RlsWrapper = <T>(fn: (tx: TransactionSql) => Promise<T>) => Promise<T>;
 
+/**
+ * Ordem estrutural (Etapa B): dimensoes antes dos fatos, Positivador
+ * como ponto final analitico, reconciliacao de vinculos pendentes ao
+ * fim (fora desta lista; ver reconcilePendingLinks).
+ */
 const SYNC_ORDER: XpResourceKey[] = [
   'accounts',
+  'account_advisor_relations',
+  'products',
   'positions',
   'movements',
   'commissions',
+  'positivador',
 ];
 
 /**
@@ -122,11 +149,17 @@ export class XpSyncService {
     private readonly http: XpHttpClient,
     private readonly lock: XpSyncLock,
   ) {
+    // Pepper DEDICADO ao vinculo de conta; nunca reutiliza o pepper
+    // de documento e nunca e registrado em log.
+    const accountPepper = process.env.XP_ACCOUNT_PEPPER ?? '';
     this.mappers = {
-      accounts: new DefaultAccountMapper(),
+      accounts: new DefaultAccountMapper(accountPepper),
+      account_advisor_relations: new DefaultAccountAdvisorRelationMapper(),
+      products: new DefaultProductMapper(),
       positions: new DefaultPositionMapper(),
       movements: new DefaultMovementMapper(),
       commissions: new DefaultCommissionMapper(),
+      positivador: new DefaultPositivadorMapper(accountPepper),
     };
   }
 
@@ -267,6 +300,9 @@ export class XpSyncService {
               }
             });
           },
+          async (fn) => {
+            await (tx as any).savepoint((sp: TransactionSql) => fn(sp));
+          },
         );
         throw new DryRunRollback(body);
       });
@@ -298,6 +334,9 @@ export class XpSyncService {
           }
         });
       },
+      async (fn) => {
+        await inTx((tx) => fn(tx));
+      },
     );
   }
 
@@ -313,6 +352,7 @@ export class XpSyncService {
       rows: any[],
       accountMap: Map<string, string>,
     ) => Promise<void>,
+    execInTx: (fn: (tx: TransactionSql) => Promise<void>) => Promise<void>,
   ): Promise<PipelineBody> {
     const dryRun = opts.mode === 'fixture';
     const requested = opts.resources ?? SYNC_ORDER;
@@ -382,9 +422,64 @@ export class XpSyncService {
       body.resources[resource] = { pages, received, upserted, skipped };
     }
 
+    // 3. Reconciliacao dos vinculos pendentes (Etapa B, requisito 10):
+    //    idempotente, restrita ao tenant, por (tenant_id,
+    //    account_code_hash) e por dimAccountCode. Cobre o caso
+    //    "Positivador/relacao primeiro, conta depois".
+    try {
+      let reconciled = 0;
+      await execInTx(async (tx) => {
+        reconciled = await this.reconcilePendingLinks(tx, tenantId);
+      });
+      body.resources['reconciliation'] = {
+        pages: 0,
+        received: 0,
+        upserted: reconciled,
+        skipped: 0,
+      };
+    } catch {
+      errors.push('reconciliation: falha ao reconciliar vinculos pendentes.');
+    }
+
     body.status = errors.length === 0 ? 'success' : 'partial';
     body.errorSummary = errors.length ? errors.join(' | ').slice(0, 2000) : null;
     return body;
+  }
+
+  /**
+   * Preenche vinculos pendentes SEM jamais cruzar tenants:
+   *   - xp_positivador.account_id por (tenant_id, account_code_hash);
+   *   - xp_account_advisor_relations.account_id por dimAccountCode.
+   * Idempotente: so toca linhas com account_id IS NULL.
+   * Publico de proposito: executado pelo pipeline e exercitado
+   * diretamente pelos testes de banco (Positivador antes da conta).
+   */
+  async reconcilePendingLinks(
+    tx: TransactionSql,
+    tenantId: string,
+  ): Promise<number> {
+    const positivador = await tx`
+      UPDATE integrations.xp_positivador p
+      SET account_id = a.id, updated_at = NOW()
+      FROM integrations.xp_accounts a
+      WHERE p.tenant_id = ${tenantId}
+        AND a.tenant_id = p.tenant_id
+        AND p.account_id IS NULL
+        AND p.account_code_hash IS NOT NULL
+        AND a.account_code_hash = p.account_code_hash
+      RETURNING p.id
+    `;
+    const relations = await tx`
+      UPDATE integrations.xp_account_advisor_relations r
+      SET account_id = a.id, updated_at = NOW()
+      FROM integrations.xp_accounts a
+      WHERE r.tenant_id = ${tenantId}
+        AND a.tenant_id = r.tenant_id
+        AND r.account_id IS NULL
+        AND a.external_account_id = r.external_account_id
+      RETURNING r.id
+    `;
+    return positivador.length + relations.length;
   }
 
   private async fetchReprocessingLog(
@@ -412,14 +507,21 @@ export class XpSyncService {
         const [saved] = await tx`
           INSERT INTO integrations.xp_accounts
             (tenant_id, connection_id, external_account_id, account_number_mask,
-             holder_document_hash, holder_name, advisor_code, status, raw_data, synced_at)
+             account_code_hash, holder_document_hash, holder_name, advisor_code,
+             status, raw_data, synced_at)
           VALUES
             (${tenantId}, ${connectionId}, ${r.external_account_id}, ${r.account_number_mask},
-             ${r.holder_document_hash}, ${r.holder_name}, ${r.advisor_code}, ${r.status},
+             ${r.account_code_hash}, ${r.holder_document_hash}, ${r.holder_name},
+             ${r.advisor_code}, ${r.status},
              ${(tx as any).json(r.raw_data)}, NOW())
           ON CONFLICT (tenant_id, external_account_id) DO UPDATE SET
             connection_id = EXCLUDED.connection_id,
             account_number_mask = EXCLUDED.account_number_mask,
+            -- Nunca apaga um hash ja calculado por causa de pepper
+            -- ausente num run posterior (rotacao exige ressincronizacao
+            -- deliberada; ver XP_DATA_CONTRACT.md).
+            account_code_hash = COALESCE(EXCLUDED.account_code_hash,
+                                         integrations.xp_accounts.account_code_hash),
             holder_document_hash = EXCLUDED.holder_document_hash,
             holder_name = EXCLUDED.holder_name,
             advisor_code = EXCLUDED.advisor_code,
@@ -492,6 +594,184 @@ export class XpSyncService {
         if (rows.length > 0) markWritten(row);
         return;
       }
+      case 'products': {
+        const r = row as XpProductRow;
+        await tx`
+          INSERT INTO integrations.xp_products
+            (tenant_id, external_product_id, asset_code, product_name, issuer_name,
+             classification_l0, classification_l1, classification_l2,
+             classification_l3, classification_l4, classification_l5,
+             custody_type, issue_date, due_date, manager_name, strategy,
+             yield_description, index_name, deal_type, product_type,
+             interest_payment_frequency, current_register, raw_data,
+             last_update, available_data, synced_at)
+          VALUES
+            (${tenantId}, ${r.external_product_id}, ${r.asset_code}, ${r.product_name},
+             ${r.issuer_name}, ${r.classification_l0}, ${r.classification_l1},
+             ${r.classification_l2}, ${r.classification_l3}, ${r.classification_l4},
+             ${r.classification_l5}, ${r.custody_type}, ${r.issue_date}, ${r.due_date},
+             ${r.manager_name}, ${r.strategy}, ${r.yield_description}, ${r.index_name},
+             ${r.deal_type}, ${r.product_type}, ${r.interest_payment_frequency},
+             ${r.current_register}, ${(tx as any).json(r.raw_data)},
+             ${r.last_update}, ${r.available_data}, NOW())
+          ON CONFLICT (tenant_id, external_product_id) DO UPDATE SET
+            asset_code = EXCLUDED.asset_code,
+            product_name = EXCLUDED.product_name,
+            issuer_name = EXCLUDED.issuer_name,
+            classification_l0 = EXCLUDED.classification_l0,
+            classification_l1 = EXCLUDED.classification_l1,
+            classification_l2 = EXCLUDED.classification_l2,
+            classification_l3 = EXCLUDED.classification_l3,
+            classification_l4 = EXCLUDED.classification_l4,
+            classification_l5 = EXCLUDED.classification_l5,
+            custody_type = EXCLUDED.custody_type,
+            issue_date = EXCLUDED.issue_date,
+            due_date = EXCLUDED.due_date,
+            manager_name = EXCLUDED.manager_name,
+            strategy = EXCLUDED.strategy,
+            yield_description = EXCLUDED.yield_description,
+            index_name = EXCLUDED.index_name,
+            deal_type = EXCLUDED.deal_type,
+            product_type = EXCLUDED.product_type,
+            interest_payment_frequency = EXCLUDED.interest_payment_frequency,
+            current_register = EXCLUDED.current_register,
+            raw_data = EXCLUDED.raw_data,
+            last_update = EXCLUDED.last_update,
+            available_data = EXCLUDED.available_data,
+            synced_at = NOW(),
+            updated_at = NOW()
+        `;
+        markWritten(row);
+        return;
+      }
+      case 'account_advisor_relations': {
+        const r = row as XpAccountAdvisorRelationRow;
+        const accountId = await this.resolveAccountId(
+          tx, tenantId, r.external_account_id, accountMap,
+        );
+        await tx`
+          INSERT INTO integrations.xp_account_advisor_relations
+            (tenant_id, external_relation_id, external_account_id, account_id,
+             advisor_code, reference_date, start_validity_date, end_validity_date,
+             current_register, raw_data, last_update, available_data, synced_at)
+          VALUES
+            (${tenantId}, ${r.external_relation_id}, ${r.external_account_id},
+             ${accountId}, ${r.advisor_code}, ${r.reference_date},
+             ${r.start_validity_date}, ${r.end_validity_date}, ${r.current_register},
+             ${(tx as any).json(r.raw_data)}, ${r.last_update}, ${r.available_data},
+             NOW())
+          ON CONFLICT (tenant_id, external_relation_id, reference_date) DO UPDATE SET
+            external_account_id = EXCLUDED.external_account_id,
+            account_id = COALESCE(EXCLUDED.account_id,
+                                  integrations.xp_account_advisor_relations.account_id),
+            advisor_code = EXCLUDED.advisor_code,
+            start_validity_date = EXCLUDED.start_validity_date,
+            end_validity_date = EXCLUDED.end_validity_date,
+            current_register = EXCLUDED.current_register,
+            raw_data = EXCLUDED.raw_data,
+            last_update = EXCLUDED.last_update,
+            available_data = EXCLUDED.available_data,
+            synced_at = NOW(),
+            updated_at = NOW()
+        `;
+        markWritten(row);
+        return;
+      }
+      case 'positivador': {
+        const r = row as XpPositivadorRow;
+        // Vinculo por hash na propria ingestao quando a conta ja existe;
+        // o caso "Positivador primeiro, conta depois" e coberto pela
+        // reconciliacao ao final do pipeline.
+        const accountId = r.account_code_hash
+          ? await this.resolveAccountIdByHash(tx, tenantId, r.account_code_hash)
+          : null;
+        await tx`
+          INSERT INTO integrations.xp_positivador
+            (tenant_id, external_positivador_id, account_code_hash, account_id,
+             advisor_code, head_office_code, segment, segment_client, suitability,
+             made_second_contribution, status, activated_in_month, churned_in_month,
+             operated_stock_exchange, operated_funds, operated_fixed_income,
+             financial_applications, revenue_in_month, bovespa_revenue,
+             futures_revenue, fixed_income_banking_revenue,
+             fixed_income_private_revenue, fixed_income_public_revenue,
+             gross_capture_in_month, redemption_in_month, net_capture_in_month,
+             ted_capture, st_capture, ota_capture, fixed_income_capture,
+             treasury_direct_capture, pension_capture, net_in_m1, net_in_month,
+             net_fixed_income, net_real_estate_funds, net_equities, net_funds,
+             net_financial, net_pension, net_others, rental_revenue,
+             package_complement_revenue, person_type, position_date,
+             last_update, available_data, synced_at)
+          VALUES
+            (${tenantId}, ${r.external_positivador_id}, ${r.account_code_hash},
+             ${accountId}, ${r.advisor_code}, ${r.head_office_code}, ${r.segment},
+             ${r.segment_client}, ${r.suitability}, ${r.made_second_contribution},
+             ${r.status}, ${r.activated_in_month}, ${r.churned_in_month},
+             ${r.operated_stock_exchange}, ${r.operated_funds},
+             ${r.operated_fixed_income}, ${r.financial_applications},
+             ${r.revenue_in_month}, ${r.bovespa_revenue}, ${r.futures_revenue},
+             ${r.fixed_income_banking_revenue}, ${r.fixed_income_private_revenue},
+             ${r.fixed_income_public_revenue}, ${r.gross_capture_in_month},
+             ${r.redemption_in_month}, ${r.net_capture_in_month}, ${r.ted_capture},
+             ${r.st_capture}, ${r.ota_capture}, ${r.fixed_income_capture},
+             ${r.treasury_direct_capture}, ${r.pension_capture}, ${r.net_in_m1},
+             ${r.net_in_month}, ${r.net_fixed_income}, ${r.net_real_estate_funds},
+             ${r.net_equities}, ${r.net_funds}, ${r.net_financial}, ${r.net_pension},
+             ${r.net_others}, ${r.rental_revenue}, ${r.package_complement_revenue},
+             ${r.person_type}, ${r.position_date}, ${r.last_update},
+             ${r.available_data}, NOW())
+          ON CONFLICT (tenant_id, external_positivador_id, position_date) DO UPDATE SET
+            account_code_hash = COALESCE(EXCLUDED.account_code_hash,
+                                         integrations.xp_positivador.account_code_hash),
+            account_id = COALESCE(EXCLUDED.account_id,
+                                  integrations.xp_positivador.account_id),
+            advisor_code = EXCLUDED.advisor_code,
+            head_office_code = EXCLUDED.head_office_code,
+            segment = EXCLUDED.segment,
+            segment_client = EXCLUDED.segment_client,
+            suitability = EXCLUDED.suitability,
+            made_second_contribution = EXCLUDED.made_second_contribution,
+            status = EXCLUDED.status,
+            activated_in_month = EXCLUDED.activated_in_month,
+            churned_in_month = EXCLUDED.churned_in_month,
+            operated_stock_exchange = EXCLUDED.operated_stock_exchange,
+            operated_funds = EXCLUDED.operated_funds,
+            operated_fixed_income = EXCLUDED.operated_fixed_income,
+            financial_applications = EXCLUDED.financial_applications,
+            revenue_in_month = EXCLUDED.revenue_in_month,
+            bovespa_revenue = EXCLUDED.bovespa_revenue,
+            futures_revenue = EXCLUDED.futures_revenue,
+            fixed_income_banking_revenue = EXCLUDED.fixed_income_banking_revenue,
+            fixed_income_private_revenue = EXCLUDED.fixed_income_private_revenue,
+            fixed_income_public_revenue = EXCLUDED.fixed_income_public_revenue,
+            gross_capture_in_month = EXCLUDED.gross_capture_in_month,
+            redemption_in_month = EXCLUDED.redemption_in_month,
+            net_capture_in_month = EXCLUDED.net_capture_in_month,
+            ted_capture = EXCLUDED.ted_capture,
+            st_capture = EXCLUDED.st_capture,
+            ota_capture = EXCLUDED.ota_capture,
+            fixed_income_capture = EXCLUDED.fixed_income_capture,
+            treasury_direct_capture = EXCLUDED.treasury_direct_capture,
+            pension_capture = EXCLUDED.pension_capture,
+            net_in_m1 = EXCLUDED.net_in_m1,
+            net_in_month = EXCLUDED.net_in_month,
+            net_fixed_income = EXCLUDED.net_fixed_income,
+            net_real_estate_funds = EXCLUDED.net_real_estate_funds,
+            net_equities = EXCLUDED.net_equities,
+            net_funds = EXCLUDED.net_funds,
+            net_financial = EXCLUDED.net_financial,
+            net_pension = EXCLUDED.net_pension,
+            net_others = EXCLUDED.net_others,
+            rental_revenue = EXCLUDED.rental_revenue,
+            package_complement_revenue = EXCLUDED.package_complement_revenue,
+            person_type = EXCLUDED.person_type,
+            last_update = EXCLUDED.last_update,
+            available_data = EXCLUDED.available_data,
+            synced_at = NOW(),
+            updated_at = NOW()
+        `;
+        markWritten(row);
+        return;
+      }
       case 'commissions': {
         const r = row as XpCommissionRow;
         const accountId = r.external_account_id
@@ -539,6 +819,21 @@ export class XpSyncService {
     if (!row) return null;
     cache.set(externalAccountId, row.id as string);
     return row.id as string;
+  }
+
+  /** Vinculo pseudonimizado: nunca usa o numero bruto, nunca cruza tenant. */
+  private async resolveAccountIdByHash(
+    tx: TransactionSql,
+    tenantId: string,
+    accountCodeHash: string,
+  ): Promise<string | null> {
+    const [row] = await tx`
+      SELECT id FROM integrations.xp_accounts
+      WHERE tenant_id = ${tenantId}
+        AND account_code_hash = ${accountCodeHash}
+      LIMIT 1
+    `;
+    return row ? (row.id as string) : null;
   }
 }
 
