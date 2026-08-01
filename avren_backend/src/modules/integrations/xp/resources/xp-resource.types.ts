@@ -120,22 +120,157 @@ export interface XpRawCommission {
 }
 
 /**
- * Recursos da fase 1 que ja possuem persistencia na migration 018.
+ * Dimensao Produto: /api/v1/product-partner.
+ * ATENCAO: a grafia oficial observada no portal e "productClassfication"
+ * (sem o segundo "i"). Preservada aqui deliberadamente; normalizacao so
+ * apos confirmacao em HML (pendencia registrada no XP_DATA_CONTRACT.md).
+ */
+export interface XpRawProduct {
+  dimProductCode: number | string;
+  assetCode?: string;
+  productClassficationL0?: string;
+  productClassficationL1?: string;
+  productClassficationL2?: string;
+  productClassficationL3?: string;
+  productClassficationL4?: string;
+  productClassficationL5?: string;
+  cetselCode?: string;
+  isinCode?: string;
+  cnpjCode?: string;
+  assetName?: string;
+  issuerName?: string;
+  custodyType?: string;
+  issueDate?: string;
+  dueDate?: string;
+  managerName?: string;
+  strategy?: string;
+  yield?: string;
+  index?: string;
+  dealType?: string;
+  productType?: string;
+  issueFaceValue?: number;
+  interestPaymentFrequency?: string;
+  currentPartition?: number | string;
+  currentRegister?: number | boolean;
+  id?: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Relacao conta-assessor: /api/v1/account-advisor-relation.
+ * A lista de campos NAO consta da secao publicada do contrato; os campos
+ * abaixo seguem o padrao dimensional das demais tabelas e DEVEM ser
+ * confirmados em HML antes de qualquer ampliacao (pendencia documentada).
+ */
+export interface XpRawAccountAdvisorRelation {
+  dimAccountCode: number | string;
+  dimAdvisorCode?: number | string;
+  startValidityDate?: string;
+  endValidityDate?: string;
+  currentRegisterIndicator?: number;
+  referenceDate?: string;
+  id: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Positivador: /api/v1/positivador (ponto final analitico).
+ * O tipo aceita o payload oficial completo, mas a PERSISTENCIA e por
+ * allowlist estrita no mapper: campos pessoais (birthday, gender,
+ * activity, maritalStatus, documentos) e o accountCode bruto NUNCA
+ * chegam ao banco. Grafia oficial "qualifiedInvestorTern" preservada.
+ */
+export interface XpRawPositivador {
+  advisorCode?: number | string;
+  headOfficeCode?: number | string;
+  accountCode: number | string;
+  activity?: string;
+  gender?: string;
+  segment?: string;
+  segmentClient?: string;
+  dscSuitability?: string;
+  qualifiedInvestorTern?: string;
+  professionalInvestorTerm?: string;
+  registerDate?: string;
+  madeSecondContribution?: boolean | string;
+  birthday?: string;
+  status?: string;
+  activatedInM?: boolean | string;
+  churnedInM?: boolean | string;
+  operatedStockExchange?: boolean | string;
+  operatedFunds?: boolean | string;
+  operatedFixedIncome?: boolean | string;
+  financialApplications?: number;
+  revenueInMonth?: number;
+  bovespaRevenue?: number;
+  futuresRevenue?: number;
+  fixedIncomeBankingRevenue?: number;
+  fixedIncomePrivateRevenue?: number;
+  fixedIncomePublicRevenue?: number;
+  grossCaptureInMonth?: number;
+  redemptionInMonth?: number;
+  netCaptureInMonth?: number;
+  tedCapture?: number;
+  stCapture?: number;
+  otaCapture?: number;
+  fixedIncomeCapture?: number;
+  treasuryDirectCapture?: number;
+  pensionCapture?: number;
+  netInM1?: number;
+  netInMonth?: number;
+  netFixedIncome?: number;
+  netRealEstateFunds?: number;
+  netEquities?: number;
+  netFunds?: number;
+  netFinancial?: number;
+  netPension?: number;
+  netOthers?: number;
+  rentalRevenue?: number;
+  packageComplementRevenue?: number;
+  personType?: string;
+  positionDate?: string;
+  id: number | string;
+  lastUpdate?: string;
+  availableData?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Recursos com persistencia propria (018 + 034).
  * Os nomes internos permanecem estaveis; os paths sao os oficiais.
  */
 export const XP_RESOURCE_PATHS = {
   reprocessing_log: '/api/v1/reprocessing-log',
   accounts: '/api/v1/account',
+  account_advisor_relations: '/api/v1/account-advisor-relation',
+  products: '/api/v1/product-partner',
   positions: '/api/v1/auc',
   movements: '/api/v1/inflow',
   commissions: '/api/v1/commission',
+  positivador: '/api/v1/positivador',
 } as const;
 
-/** Endpoints oficiais mapeados para a proxima fase, ainda sem persistencia. */
+/**
+ * Mapa oficial tableName (Log de Reprocessamento) -> recurso interno.
+ * Sujeito a confirmacao em HML; entradas desconhecidas NAO sao
+ * adivinhadas (ficam sem mapeamento e geram aviso).
+ */
+export const REPROCESS_TABLE_MAP: Record<string, XpResourceKey> = {
+  account: 'accounts',
+  'account-advisor-relation': 'account_advisor_relations',
+  'product-partner': 'products',
+  auc: 'positions',
+  inflow: 'movements',
+  commission: 'commissions',
+  positivador: 'positivador',
+};
+
+/** Endpoints oficiais por cliente, ainda sem persistencia (fase futura). */
 export const XP_PHASE_TWO_PATHS = {
-  account_advisor_relation: '/api/v1/account-advisor-relation',
-  products: '/api/v1/product-partner',
-  positivador: '/api/v1/positivador',
   consolidated_positions: '/api/v1/consolidated-positions/customer/{customerCode}',
   wealth_evolution: '/api/v1/wealth-evolution/customer/{customerCode}',
   investment_statement: '/api/v1/investment-account/statement/customer/{customerCode}',

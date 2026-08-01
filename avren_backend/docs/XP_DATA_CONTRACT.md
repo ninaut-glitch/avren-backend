@@ -113,3 +113,78 @@ minuto por subscription e 30 requisições por segundo por operação.
 5. Dry-run e testes de banco executados com papel sem `BYPASSRLS`.
 6. Conferência financeira de patrimônio, captação e receita com a XP.
 7. Somente então habilitar `XP_INTEGRATION_ENABLED`.
+
+## Etapa B — Produtos, Relação conta-assessor e Positivador (migration 034)
+
+### Persistência
+
+- `integrations.xp_products`: dimensão Produto, chave `(tenant_id,
+  external_product_id)` sobre `dimProductCode`. Colunas internas
+  normalizadas (`classification_l0..l5`); a grafia oficial de entrada
+  `productClassfication` (sem o segundo "i") é preservada nos tipos.
+- `integrations.xp_account_advisor_relations`: histórico por data com
+  chave `(tenant_id, external_relation_id, reference_date)`.
+- `integrations.xp_positivador`: fato gerencial mensal com chave
+  `(tenant_id, external_positivador_id, position_date)` — duas
+  competências do mesmo identificador coexistem por decisão de
+  contrato; o `ON CONFLICT` do motor usa exatamente essa chave.
+
+### Privacidade do Positivador
+
+O Positivador não possui `raw_data`: as colunas da 034 são a allowlist.
+Aniversário, gênero, profissão, estado civil, `registerDate`, termos de
+investidor e qualquer campo desconhecido do payload são descartados no
+mapper e não têm coluna de destino. O `accountCode` bruto nunca é
+persistido: o vínculo com a dimensão Account usa
+`account_code_hash = HMAC-SHA256(dígitos do accountCode, XP_ACCOUNT_PEPPER)`.
+
+O pepper de conta é dedicado (`XP_ACCOUNT_PEPPER`), nunca reutiliza
+`XP_DOCUMENT_PEPPER` e nunca aparece em logs. Ausência do pepper produz
+hash `NULL` (vínculo pendente, sem vazamento e sem derrubar o run); a
+rotação do pepper exige ressincronizar contas e Positivador para
+reconstruir os hashes — os vínculos antigos permanecem válidos até lá
+porque o upsert nunca sobrescreve hash existente com `NULL`.
+
+### Reconciliação de vínculos pendentes
+
+Ao final de cada pipeline (inclusive dry-run, revertido pelo rollback),
+o motor executa uma reconciliação idempotente e restrita ao tenant:
+
+- `xp_positivador.account_id` por `(tenant_id, account_code_hash)`;
+- `xp_account_advisor_relations.account_id` por `dimAccountCode`.
+
+Isso cobre o caso "Positivador primeiro, conta depois". Nenhuma
+consulta cruza tenants; hashes iguais em tenants distintos não criam
+vínculo (provado por teste de banco).
+
+### Determinismo da data da relação
+
+`reference_date` nunca é a data corrente de ingestão. Ordem de
+resolução: `referenceDate` oficial → `startValidityDate` →
+`lastUpdate`. Sem data confiável, o registro é descartado de forma
+controlada (contado em `skipped`). A coluna é `NOT NULL` de propósito.
+
+### Reprocessamento
+
+`REPROCESS_TABLE_MAP` (tipos) fixa o mapa `tableName → recurso
+interno`: `account→accounts`, `account-advisor-relation→
+account_advisor_relations`, `product-partner→products`,
+`auc→positions`, `inflow→movements`, `commission→commissions`,
+`positivador→positivador`. Nomes desconhecidos não são adivinhados. A
+rebusca dos intervalos continua NÃO implementada; em modo live o run
+termina `partial` com aviso, nunca fingindo sucesso.
+
+### Pendências dependentes de HML (Etapa B)
+
+1. Lista real de campos da relação conta-assessor (a seção publicada do
+   contrato não a documenta; os tipos atuais seguem o padrão
+   dimensional e aceitam evolução aditiva).
+2. Estabilidade do `id` do Positivador entre competências — a chave com
+   `position_date` protege o histórico nos dois cenários.
+3. Formato de `positionDate` (ISO ou `AAAAMMDD`; o mapper aceita ambos).
+4. Semântica dos booleanos (`boolean` nativo ou `S`/`N`; aceitos ambos).
+5. Grafias oficiais `productClassfication` e `qualifiedInvestorTern`
+   (preservadas na entrada; não normalizar sem evidência de HML).
+6. Enriquecimento da custódia pela dimensão Produto (join por
+   `dimProductCode` nos read models da Etapa C; a custódia continua
+   com placeholders até lá — nada foi inventado).

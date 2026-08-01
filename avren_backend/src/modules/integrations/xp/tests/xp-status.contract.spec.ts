@@ -40,6 +40,7 @@ const NON_SECRET_REQUIRED = {
   XP_OAUTH_SCOPE: 'api://xp-data-access/.default',
   XP_USER_AGENT: 'AVREN-OS/1.0 (parceiro=AVREN)',
   XP_DOCUMENT_PEPPER: 'PEPPER-FICTICIO-NAO-USAR-FORA-DOS-TESTES',
+  XP_ACCOUNT_PEPPER: 'PEPPER-DE-CONTA-FICTICIO-NAO-USAR-FORA-DOS-TESTES',
   // certificado valido por padrao, para os testes de ready
   XP_MTLS_CERT_EXPIRES_AT: new Date(
     Date.now() + 365 * 24 * 60 * 60 * 1000,
@@ -101,7 +102,7 @@ describe('getStatus - contrato consumido pelo frontend', () => {
     for (const key of [
       'apiBaseUrl', 'authUrl', 'azureTenantId', 'clientId',
       'clientSecret', 'subscriptionKey', 'oauthScope', 'userAgent',
-      'documentPepper', 'mtls',
+      'documentPepper', 'accountPepper', 'mtls',
     ] as const) {
       expect(rc).toHaveProperty(key);
       expect(typeof rc[key]).toBe('boolean');
@@ -124,6 +125,7 @@ describe('getStatus - contrato consumido pelo frontend', () => {
     expect(status.requiredConfiguration.oauthScope).toBe(true);
     expect(status.requiredConfiguration.userAgent).toBe(true);
     expect(status.requiredConfiguration.documentPepper).toBe(true);
+    expect(status.requiredConfiguration.accountPepper).toBe(true);
     expect(status.requiredConfiguration.clientSecret).toBe(false);
     expect(status.requiredConfiguration.subscriptionKey).toBe(false);
     expect(status.requiredConfiguration.mtls).toBe(false);
@@ -148,6 +150,25 @@ describe('getStatus - contrato consumido pelo frontend', () => {
     expect(status.requiredConfiguration.documentPepper).toBe(false);
     expect(status.credentialsConfigured).toBe(false);
     expect(status.ready).toBe(false);
+  });
+
+  it('Etapa B: pepper de CONTA ausente (ou so espacos) derruba credentialsConfigured e ready', async () => {
+    const ausente = await makeService({ XP_ACCOUNT_PEPPER: '' }).getStatus(CTX);
+    expect(ausente.requiredConfiguration.accountPepper).toBe(false);
+    expect(ausente.credentialsConfigured).toBe(false);
+    expect(ausente.ready).toBe(false);
+
+    const soEspacos = await makeService({ XP_ACCOUNT_PEPPER: '   ' }).getStatus(CTX);
+    expect(soEspacos.requiredConfiguration.accountPepper).toBe(false);
+    expect(soEspacos.credentialsConfigured).toBe(false);
+    expect(soEspacos.ready).toBe(false);
+  });
+
+  it('Etapa B: o VALOR do pepper de conta nunca aparece na resposta de status', async () => {
+    const status = await makeService().getStatus(CTX);
+    expect(JSON.stringify(status)).not.toContain(
+      'PEPPER-DE-CONTA-FICTICIO-NAO-USAR-FORA-DOS-TESTES',
+    );
   });
 
   it('ready exige certificado ok ou warning, nunca expired nem not_configured', async () => {
