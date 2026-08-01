@@ -250,6 +250,8 @@ WHERE (n.nspname || '.' || c.relname) = ANY (ARRAY[
   'integrations.xp_connections','integrations.xp_accounts',
   'integrations.xp_positions','integrations.xp_movements',
   'integrations.xp_commissions','integrations.xp_sync_runs',
+  'integrations.xp_products','integrations.xp_account_advisor_relations',
+  'integrations.xp_positivador',
   'wealth.clients','wealth.assets','wealth.asset_snapshots',
   'wealth.opportunities','wealth.client_contacts','wealth.client_addresses',
   'wealth.family_members','wealth.relationships','wealth.interactions',
@@ -259,3 +261,106 @@ WHERE (n.nspname || '.' || c.relname) = ANY (ARRAY[
   'wealth.pp_liabilities','wealth.pp_insurance','wealth.pp_structures'
 ])
   AND NOT c.relforcerowsecurity;
+
+-- ── Etapa B (migration 034): postura das tabelas XP novas ─────
+-- A lista de FORCE acima ja cobre "existe mas nao esta forcada";
+-- os blocos abaixo cobrem o que aquela lista NAO detecta:
+-- ausencia da tabela, RLS desabilitado, grants a PUBLIC e grants
+-- de runtime ausentes. Esperado: zero linhas.
+SELECT 'xp_phase_b_table_missing' AS finding, expected.tbl AS object
+FROM (VALUES
+  ('xp_products'),
+  ('xp_account_advisor_relations'),
+  ('xp_positivador')
+) AS expected(tbl)
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'integrations'
+    AND c.relname = expected.tbl
+    AND c.relkind = 'r'
+)
+UNION ALL
+SELECT 'xp_phase_b_rls_disabled', 'integrations.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'integrations'
+  AND c.relname IN ('xp_products','xp_account_advisor_relations','xp_positivador')
+  AND c.relkind = 'r'
+  AND NOT c.relrowsecurity
+UNION ALL
+-- DELIBERADO: esta checagem duplica a cobertura da lista explicita de
+-- FORCE (forced_table_not_forced) para as tres tabelas da Etapa B.
+-- Uma regressao de FORCE aqui emitira DOIS achados — defesa em
+-- profundidade: se alguem remover a tabela da lista generica, este
+-- bloco dedicado ainda dispara.
+SELECT 'xp_phase_b_rls_not_forced', 'integrations.' || c.relname
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'integrations'
+  AND c.relname IN ('xp_products','xp_account_advisor_relations','xp_positivador')
+  AND c.relkind = 'r'
+  AND NOT c.relforcerowsecurity
+UNION ALL
+SELECT 'xp_phase_b_tenant_policy_missing', 'integrations.' || expected.tbl
+FROM (VALUES
+  ('xp_products', 'xp_products_tenant_policy'),
+  ('xp_account_advisor_relations', 'xp_aar_tenant_policy'),
+  ('xp_positivador', 'xp_positivador_tenant_policy')
+) AS expected(tbl, policy)
+WHERE EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'integrations' AND c.relname = expected.tbl
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_policies p
+    WHERE p.schemaname = 'integrations'
+      AND p.tablename = expected.tbl
+      -- nome esperado: uma policy permissiva com outro nome nao conta
+      AND p.policyname = expected.policy
+      AND p.cmd = 'ALL'
+      -- mencionar app.current_tenant_id nao basta: a expressao precisa
+      -- COMPARAR a coluna tenant_id. Regex com fronteira de palavra
+      -- (\m...\M): a coluna casa ("(tenant_id = ..."), mas o literal
+      -- 'app.current_tenant_id' NAO casa (precedido de '_', caractere
+      -- de palavra) — provado por sabotagem com policy permissiva.
+      AND COALESCE(p.qual, '') ~ '\mtenant_id\M\s*='
+      AND COALESCE(p.qual, '') LIKE '%app.current_tenant_id%'
+      AND COALESCE(p.with_check, '') ~ '\mtenant_id\M\s*='
+      AND COALESCE(p.with_check, '') LIKE '%app.current_tenant_id%'
+  )
+UNION ALL
+SELECT 'xp_phase_b_public_grant',
+       'integrations.' || table_name || ' <- ' || privilege_type
+FROM information_schema.table_privileges
+WHERE table_schema = 'integrations'
+  AND table_name IN ('xp_products','xp_account_advisor_relations','xp_positivador')
+  AND grantee = 'PUBLIC'
+UNION ALL
+-- grants de COLUNA a PUBLIC nao aparecem em table_privileges quando
+-- concedidos coluna a coluna; cobertos aqui separadamente.
+SELECT 'xp_phase_b_public_column_grant',
+       'integrations.' || table_name || '.' || column_name || ' <- ' || privilege_type
+FROM information_schema.column_privileges
+WHERE table_schema = 'integrations'
+  AND table_name IN ('xp_products','xp_account_advisor_relations','xp_positivador')
+  AND grantee = 'PUBLIC'
+UNION ALL
+SELECT 'xp_phase_b_runtime_grant_missing',
+       'integrations.' || c.relname || ' sem ' || expected.priv
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+CROSS JOIN (VALUES
+  ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')
+) AS expected(priv)
+WHERE n.nspname = 'integrations'
+  AND c.relname IN ('xp_products','xp_account_advisor_relations','xp_positivador')
+  AND c.relkind = 'r'
+  AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'avren_app')
+  -- has_table_privilege por OID: so avalia linhas de tabelas que
+  -- existem, entao tabela ausente nunca gera erro aqui (ela ja e
+  -- reportada por xp_phase_b_table_missing).
+  AND NOT has_table_privilege('avren_app', c.oid, expected.priv);
