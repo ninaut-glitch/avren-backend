@@ -290,6 +290,11 @@ WHERE n.nspname = 'integrations'
   AND c.relkind = 'r'
   AND NOT c.relrowsecurity
 UNION ALL
+-- DELIBERADO: esta checagem duplica a cobertura da lista explicita de
+-- FORCE (forced_table_not_forced) para as tres tabelas da Etapa B.
+-- Uma regressao de FORCE aqui emitira DOIS achados — defesa em
+-- profundidade: se alguem remover a tabela da lista generica, este
+-- bloco dedicado ainda dispara.
 SELECT 'xp_phase_b_rls_not_forced', 'integrations.' || c.relname
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -300,10 +305,10 @@ WHERE n.nspname = 'integrations'
 UNION ALL
 SELECT 'xp_phase_b_tenant_policy_missing', 'integrations.' || expected.tbl
 FROM (VALUES
-  ('xp_products'),
-  ('xp_account_advisor_relations'),
-  ('xp_positivador')
-) AS expected(tbl)
+  ('xp_products', 'xp_products_tenant_policy'),
+  ('xp_account_advisor_relations', 'xp_aar_tenant_policy'),
+  ('xp_positivador', 'xp_positivador_tenant_policy')
+) AS expected(tbl, policy)
 WHERE EXISTS (
     SELECT 1 FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -314,14 +319,32 @@ WHERE EXISTS (
     FROM pg_policies p
     WHERE p.schemaname = 'integrations'
       AND p.tablename = expected.tbl
+      -- nome esperado: uma policy permissiva com outro nome nao conta
+      AND p.policyname = expected.policy
       AND p.cmd = 'ALL'
+      -- mencionar app.current_tenant_id nao basta: a expressao precisa
+      -- COMPARAR a coluna tenant_id. Regex com fronteira de palavra
+      -- (\m...\M): a coluna casa ("(tenant_id = ..."), mas o literal
+      -- 'app.current_tenant_id' NAO casa (precedido de '_', caractere
+      -- de palavra) — provado por sabotagem com policy permissiva.
+      AND COALESCE(p.qual, '') ~ '\mtenant_id\M\s*='
       AND COALESCE(p.qual, '') LIKE '%app.current_tenant_id%'
+      AND COALESCE(p.with_check, '') ~ '\mtenant_id\M\s*='
       AND COALESCE(p.with_check, '') LIKE '%app.current_tenant_id%'
   )
 UNION ALL
 SELECT 'xp_phase_b_public_grant',
        'integrations.' || table_name || ' <- ' || privilege_type
 FROM information_schema.table_privileges
+WHERE table_schema = 'integrations'
+  AND table_name IN ('xp_products','xp_account_advisor_relations','xp_positivador')
+  AND grantee = 'PUBLIC'
+UNION ALL
+-- grants de COLUNA a PUBLIC nao aparecem em table_privileges quando
+-- concedidos coluna a coluna; cobertos aqui separadamente.
+SELECT 'xp_phase_b_public_column_grant',
+       'integrations.' || table_name || '.' || column_name || ' <- ' || privilege_type
+FROM information_schema.column_privileges
 WHERE table_schema = 'integrations'
   AND table_name IN ('xp_products','xp_account_advisor_relations','xp_positivador')
   AND grantee = 'PUBLIC'
