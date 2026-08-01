@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Sql, TransactionSql } from 'postgres';
 import { DATABASE_CLIENT } from '../../../../database/database.provider';
 import { SessionContext, withRls } from '../../../../database/rls.helper';
@@ -8,8 +7,10 @@ import { XpSyncLock } from './xp-lock';
 import { XpApiError, XpHttpClient } from '../client/xp-http.client';
 import {
   XP_RESOURCE_PATHS,
+  XpDataPage,
   XpReprocessingLogEntry,
   XpResourceKey,
+  pageItems,
 } from '../resources/xp-resource.types';
 import {
   DefaultAccountMapper,
@@ -59,8 +60,8 @@ export function planReprocessing(
 ): ReprocessPlan {
   return {
     entries: entries
-      .filter((e) => e?.resource && e?.referenceDate)
-      .map((e) => ({ resource: e.resource, referenceDate: e.referenceDate })),
+      .filter((e) => e?.tableName && e?.referenceDate)
+      .map((e) => ({ resource: e.tableName, referenceDate: e.referenceDate })),
   };
 }
 
@@ -120,11 +121,9 @@ export class XpSyncService {
     @Inject(DATABASE_CLIENT) private readonly sql: Sql,
     private readonly http: XpHttpClient,
     private readonly lock: XpSyncLock,
-    config: ConfigService,
   ) {
-    const documentPepper = String(config.get('XP_DOCUMENT_PEPPER') ?? '');
     this.mappers = {
-      accounts: new DefaultAccountMapper(documentPepper),
+      accounts: new DefaultAccountMapper(),
       positions: new DefaultPositionMapper(),
       movements: new DefaultMovementMapper(),
       commissions: new DefaultCommissionMapper(),
@@ -392,10 +391,10 @@ export class XpSyncService {
     mode: 'fixture' | 'live',
   ): Promise<XpReprocessingLogEntry[]> {
     if (mode === 'fixture') return [...FIXTURES.reprocessing_log];
-    const page = await this.http.request<{ value: XpReprocessingLogEntry[] }>(
+    const page = await this.http.request<XpDataPage<XpReprocessingLogEntry>>(
       XP_RESOURCE_PATHS.reprocessing_log,
     );
-    return page.value ?? [];
+    return pageItems(page);
   }
 
   /** Upserts casando as constraints reais da 018 (ver v2, inalterado). */

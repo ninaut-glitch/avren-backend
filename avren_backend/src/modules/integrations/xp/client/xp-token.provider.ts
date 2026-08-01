@@ -126,7 +126,8 @@ export class XpTokenProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': this.config.get('XP_USER_AGENT') ?? 'AVREN-OS/1.0',
+          'User-Agent':
+            this.config.get('XP_USER_AGENT') ?? 'XPparceiroDataAccess/AVREN',
         },
         body,
         signal: controller.signal,

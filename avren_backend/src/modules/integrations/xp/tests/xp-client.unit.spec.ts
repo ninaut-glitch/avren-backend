@@ -12,7 +12,11 @@ import { XpApiError, XpHttpClient } from '../client/xp-http.client';
 import { planReprocessing } from '../sync/xp-sync.service';
 import {
   DefaultAccountMapper,
+  DefaultCommissionMapper,
+  DefaultMovementMapper,
+  DefaultPositionMapper,
   hashDocument,
+  sanitizeAccountRawData,
   sanitizeRawData,
 } from '../mappers/xp-mappers';
 
@@ -24,7 +28,7 @@ const BASE = {
   XP_INTEGRATION_ENABLED: 'true',
   XP_API_BASE_URL: 'https://matls-api-hml.xpi.com.br',
   XP_SUBSCRIPTION_KEY: 'sub-key-fake',
-  XP_USER_AGENT: 'AVREN-OS-Test/1.0',
+  XP_USER_AGENT: 'XPparceiroDataAccess/AVREN-Test',
   XP_HTTP_TIMEOUT_MS: '2000',
   XP_HTTP_MAX_RETRIES: '2',
   XP_RATE_LIMIT_RPS: '50',
@@ -248,7 +252,7 @@ describe('XpHttpClient - guardas e configuracao', () => {
       { XP_HTTP_TIMEOUT_MS: '999999' },
       { XP_HTTP_MAX_RETRIES: '99' },
       { XP_RATE_LIMIT_RPS: '0' },
-      { XP_PAGE_SIZE: '10000' },
+      { XP_PAGE_SIZE: '50001' },
     ]) {
       const { client } = makeClient(bad as any);
       (global as any).fetch = jest.fn();
@@ -267,7 +271,7 @@ describe('XpHttpClient - guardas e configuracao', () => {
     const fetchMock = mockFetch([{ status: 401 }, { status: 200, json: {} }]);
     await client.request('/accounts');
     const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers['User-Agent']).toBe('AVREN-OS-Test/1.0');
+    expect(init.headers['User-Agent']).toBe('XPparceiroDataAccess/AVREN-Test');
     expect(init.headers['Ocp-Apim-Subscription-Key']).toBe('sub-key-fake');
     expect(init.redirect).toBe('error');
     expect((tokens as any).invalidate).toHaveBeenCalledTimes(1);
@@ -311,6 +315,38 @@ describe('XpHttpClient - nextLink', () => {
     expect(secondUrl).toContain('$skiptoken=abc');
   });
 
+  it('pagina o envelope data oficial com $skip/$top', async () => {
+    const { client } = makeClient({ XP_PAGE_SIZE: '2' });
+    const fetchMock = mockFetch([
+      { status: 200, json: { data: [{ i: 1 }, { i: 2 }] } },
+      { status: 200, json: { data: [{ i: 3 }] } },
+    ]);
+    const seen: number[] = [];
+    const res = await client.paginate<{ i: number }>('/api/v1/auc', async (items) => {
+      seen.push(...items.map((x) => x.i));
+    });
+
+    expect(seen).toEqual([1, 2, 3]);
+    expect(res).toEqual({ pages: 2, records: 3 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('%24skip=0');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('%24skip=2');
+  });
+
+  it('encerra apos pagina cheia seguida de pagina vazia', async () => {
+    const { client } = makeClient({ XP_PAGE_SIZE: '2' });
+    const fetchMock = mockFetch([
+      { status: 200, json: { data: [{ i: 1 }, { i: 2 }] } },
+      { status: 200, json: { data: [] } },
+    ]);
+    const res = await client.paginate<{ i: number }>(
+      '/api/v1/inflow',
+      async () => undefined,
+    );
+
+    expect(res).toEqual({ pages: 2, records: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('recusa nextLink com HTTP (sem TLS)', async () => {
     const { client } = makeClient();
     mockFetch([
@@ -346,11 +382,14 @@ describe('XpHttpClient - nextLink', () => {
 describe('planReprocessing (contrato, requisito 8)', () => {
   it('deriva o plano do log e descarta entradas incompletas', () => {
     const plan = planReprocessing([
-      { resource: 'positions', referenceDate: '2026-07-25', reprocessedAt: 'x' },
-      { resource: '', referenceDate: '2026-07-26', reprocessedAt: 'x' } as any,
+      {
+        tableName: 'auc', referenceDate: '2026-07-25', typeProcessing: 'FULL',
+        minimumProcessingDate: '2026-07-25', maximumProcessingDate: '2026-07-25',
+      },
+      { tableName: '', referenceDate: '2026-07-26' } as any,
     ]);
     expect(plan.entries).toEqual([
-      { resource: 'positions', referenceDate: '2026-07-25' },
+      { resource: 'auc', referenceDate: '2026-07-25' },
     ]);
   });
 });
@@ -384,18 +423,80 @@ describe('mappers XP - privacidade', () => {
     });
   });
 
-  it('mapper de conta nao persiste documento nem nome no raw_data', () => {
-    const row = new DefaultAccountMapper('pepper-de-teste').map({
-      accountId: 'A-1',
-      holderDocument: '123.456.789-09',
-      holderName: 'Pessoa Teste',
-      accountNumber: '123456',
+  it('mapper de conta persiste apenas chaves tecnicas no raw_data', () => {
+    const row = new DefaultAccountMapper().map({
+      dimAccountCode: 1001,
+      accountCode: 123456,
+      cpfCnpjCodeGuid: 'guid-sensivel',
+      incomeValue: 100000,
+      realStateValue: 500000,
+      maritalStatus: 'casado',
+      activity: 'empresario',
+      currentRegisterIndicator: 1,
     });
 
-    expect(row?.holder_document_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(row?.external_account_id).toBe('1001');
+    expect(row?.account_number_mask).toBe('****3456');
+    expect(row?.holder_document_hash).toBeNull();
     expect(row?.raw_data).toEqual({
-      accountId: 'A-1',
-      accountNumber: '123456',
+      dimAccountCode: 1001,
+      currentRegisterIndicator: 1,
+    });
+    expect(row?.raw_data).not.toHaveProperty('accountCode');
+    expect(row?.raw_data).not.toHaveProperty('incomeValue');
+    expect(row?.raw_data).not.toHaveProperty('realStateValue');
+  });
+
+  it('allowlist de conta preserva dimAccountCode e ignora campos novos', () => {
+    expect(
+      sanitizeAccountRawData({
+        dimAccountCode: 44,
+        accountCode: 998877,
+        currentRegisterIndicator: 0,
+        campoNovoSensivel: 'nao deve persistir',
+      }),
+    ).toEqual({ dimAccountCode: 44, currentRegisterIndicator: 0 });
+  });
+
+  it('documenta registro nao vigente como inativo', () => {
+    expect(
+      new DefaultAccountMapper().map({
+        dimAccountCode: 1002,
+        accountCode: 654321,
+        currentRegisterIndicator: 0,
+      })?.status,
+    ).toBe('inactive');
+  });
+
+  it('mapeia custodia, captacao e comissao do contrato oficial', () => {
+    const position = new DefaultPositionMapper().map({
+      id: 10, dimAccountCode: 1001, dimTimeCode: 20260731,
+      dimProductCode: 2002, positionAmount: 3, positionValue: 15000,
+    });
+    const movement = new DefaultMovementMapper().map({
+      id: 11, dimAccountCode: 1001, dimTimeCode: 20260731,
+      dimProductCode: 2002, dimMovementTypeCode: 4,
+      movementNatureCode: 'C', movementAmount: 2, movementValue: 5000,
+    });
+    const commission = new DefaultCommissionMapper().map({
+      id: 12, dimAccountCode: 1001, dimTimeCode: 20260701,
+      dimAdvisorCode: 3003, dimProductCode: 2002,
+      grossRevenueValue: 900, netRevenueValue: 450,
+    });
+
+    expect(position).toMatchObject({
+      external_position_id: '10', external_account_id: '1001',
+      product_code: '2002', gross_value: 15000, as_of_date: '2026-07-31',
+    });
+    expect(movement).toMatchObject({
+      external_movement_id: '11', external_account_id: '1001',
+      movement_type: '4', transaction_type: 'C', amount: 5000,
+      occurred_at: '2026-07-31T00:00:00Z',
+    });
+    expect(commission).toMatchObject({
+      external_commission_id: '12', external_account_id: '1001',
+      advisor_code: '3003', gross_amount: 900, net_amount: 450,
+      competence_date: '2026-07-01',
     });
   });
 });
