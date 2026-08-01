@@ -44,6 +44,7 @@ export interface XpStatusResponse {
     oauthScope: boolean;
     userAgent: boolean;
     documentPepper: boolean;
+    accountPepper: boolean;
     mtls: boolean;
   };
   /** Como a URL de autenticacao foi obtida: explicita, derivada ou ausente. */
@@ -103,6 +104,15 @@ export class XpIntegrationService {
       userAgent: Boolean(String(this.config.get('XP_USER_AGENT') ?? '').trim()),
       documentPepper: Boolean(
         String(this.config.get('XP_DOCUMENT_PEPPER') ?? '').trim(),
+      ),
+      // Etapa B: sem o pepper DEDICADO de conta, account_code_hash sai
+      // NULL e os vinculos do Positivador ficam todos pendentes. E
+      // pre-requisito operacional antes de ligar a integracao, entao
+      // sua ausencia derruba credentialsConfigured e ready. O VALOR do
+      // pepper nunca e retornado pela API nem registrado em log —
+      // apenas este booleano de presenca.
+      accountPepper: Boolean(
+        String(this.config.get('XP_ACCOUNT_PEPPER') ?? '').trim(),
       ),
       mtls: hasMtlsViaPath || hasMtlsViaBase64,
     };
