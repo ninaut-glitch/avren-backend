@@ -32,6 +32,8 @@ import { XpSyncService } from '../sync/xp-sync.service';
 import { XpSyncLock } from '../sync/xp-lock';
 import { XpReconciliationService } from '../reconciliation/xp-reconciliation.service';
 import { XpHttpClient } from '../client/xp-http.client';
+import { XpReadModelService } from '../xp-read-model.service';
+import { ConfigService } from '@nestjs/config';
 import { SessionContext, withRls } from '../../../../database/rls.helper';
 
 const APP_URL = process.env.TEST_DATABASE_URL;
@@ -120,6 +122,7 @@ d('Integracao XP - banco real', () => {
   let ctxB: SessionContext;
   let sync: XpSyncService;
   let reconciliation: XpReconciliationService;
+  let readModel: XpReadModelService;
 
   beforeAll(async () => {
     assertSafeTestDatabaseUrl(ADMIN_URL as string, 'TEST_ADMIN_DATABASE_URL');
@@ -192,6 +195,10 @@ d('Integracao XP - banco real', () => {
       new XpSyncLock(sql),
     );
     reconciliation = new XpReconciliationService(sql);
+    readModel = new XpReadModelService(
+      sql,
+      { get: () => 'true' } as unknown as ConfigService,
+    );
   });
 
   afterAll(async () => {
@@ -498,5 +505,85 @@ d('Integracao XP - banco real', () => {
     expect(rows[0].advisorCode).toBe('2001');
     expect(rows[1].advisorCode).toBe('2002');
     for (const r of rows) expect(r.accountId).not.toBeNull();
+  });
+
+  // ── Etapa C: read models patrimoniais ────────────────────────
+
+  it('read model usa somente a ultima posicao por conta e consolida o mes', async () => {
+    const [connection] = await withRls(sql, ctxA, (tx) => tx`
+      INSERT INTO integrations.xp_connections (tenant_id)
+      VALUES (${tenantA})
+      ON CONFLICT (tenant_id) DO UPDATE SET updated_at = NOW()
+      RETURNING id
+    `);
+    const [account] = await withRls(sql, ctxA, (tx) => tx`
+      INSERT INTO integrations.xp_accounts
+        (tenant_id, connection_id, external_account_id, client_id, link_status,
+         account_number_mask)
+      VALUES (${tenantA}, ${connection.id}, 'ACC-READ-A', ${clientA}, 'linked', '***1234')
+      ON CONFLICT (tenant_id, external_account_id) DO UPDATE SET
+        client_id = EXCLUDED.client_id,
+        link_status = EXCLUDED.link_status
+      RETURNING id
+    `);
+    await withRls(sql, ctxA, (tx) => tx`
+      INSERT INTO integrations.xp_positions
+        (tenant_id, account_id, external_position_id, asset_class, product_name,
+         gross_value, net_value, invested_value, currency, as_of_date)
+      VALUES
+        (${tenantA}, ${account.id}, 'READ-POS-1', 'Renda Fixa', 'CDB Teste',
+         100, 99, 90, 'BRL', '2026-07-31'),
+        (${tenantA}, ${account.id}, 'READ-POS-1', 'Renda Fixa', 'CDB Teste',
+         250, 248, 200, 'BRL', '2026-08-01')
+      ON CONFLICT (account_id, external_position_id, as_of_date) DO NOTHING
+    `);
+    await withRls(sql, ctxA, (tx) => tx`
+      INSERT INTO integrations.xp_movements
+        (tenant_id, account_id, external_movement_id, movement_type,
+         product_name, amount, occurred_at)
+      VALUES (${tenantA}, ${account.id}, 'READ-MOV-1', 'credito',
+              'CDB Teste', 1000, '2026-08-02T12:00:00Z')
+      ON CONFLICT (tenant_id, external_movement_id) DO NOTHING
+    `);
+    await withRls(sql, ctxA, (tx) => tx`
+      INSERT INTO integrations.xp_commissions
+        (tenant_id, account_id, external_commission_id, gross_amount,
+         net_amount, competence_date)
+      VALUES (${tenantA}, ${account.id}, 'READ-COM-1', 50, 40, '2026-08-01')
+      ON CONFLICT (tenant_id, external_commission_id) DO NOTHING
+    `);
+    await withRls(sql, ctxA, (tx) => tx`
+      INSERT INTO integrations.xp_positivador
+        (tenant_id, external_positivador_id, account_id,
+         net_capture_in_month, activated_in_month, position_date)
+      VALUES (${tenantA}, 'READ-POSIT-1', ${account.id}, 1000, TRUE, '2026-08-01')
+      ON CONFLICT (tenant_id, external_positivador_id, position_date) DO NOTHING
+    `);
+
+    const overview = await readModel.getWealthOverview(ctxA, '2026-08');
+    expect(overview).toMatchObject({
+      available: true,
+      totals: { aum: 250, netCapture: 1000, grossRevenue: 50, netRevenue: 40 },
+      clients: { activated: 1 },
+    });
+    expect(overview.allocation).toEqual([
+      { assetClass: 'Renda Fixa', value: 250, percentage: 100 },
+    ]);
+
+    const bankerCtx = { ...ctxA, userRole: 'banker' };
+    const client = await readModel.getClientWealth(bankerCtx, clientA, '2026-08');
+    expect(client).toMatchObject({
+      available: true,
+      summary: { grossValue: 250, netValue: 248, investedValue: 200 },
+      monthly: { netCapture: 1000, grossRevenue: 50, netRevenue: 40 },
+    });
+    expect(client.positions).toHaveLength(1);
+    expect(client.recentMovements).toHaveLength(1);
+  });
+
+  it('read model do cliente respeita a policy do assessor', async () => {
+    const bankerFromTenantB = { ...ctxB, userRole: 'banker' };
+    await expect(readModel.getClientWealth(bankerFromTenantB, clientA, '2026-08'))
+      .rejects.toThrow(/Cliente nao encontrado/);
   });
 });

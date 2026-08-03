@@ -9,6 +9,7 @@ import { SessionContext } from '../../../database/rls.helper';
 import { XpIntegrationService } from './xp-integration.service';
 import { XpSyncService } from './sync/xp-sync.service';
 import { XpReconciliationService } from './reconciliation/xp-reconciliation.service';
+import { XpReadModelService } from './xp-read-model.service';
 import { LinkAccountDto, ListRunsQueryDto } from './dto/xp.dto';
 
 /**
@@ -55,6 +56,7 @@ export class XpIntegrationController {
     private readonly service: XpIntegrationService,
     private readonly sync: XpSyncService,
     private readonly reconciliation: XpReconciliationService,
+    private readonly readModel: XpReadModelService,
   ) {}
 
   @Get('status')
@@ -67,6 +69,30 @@ export class XpIntegrationController {
   @ApiOperation({ summary: 'Dados suportados pelo conector XP' })
   capabilities() {
     return this.service.getCapabilities();
+  }
+
+  // ── Read models patrimoniais ────────────────────────────────
+
+  @Get('wealth/overview')
+  @ApiOperation({ summary: 'Visao consolidada dos dados patrimoniais da XP' })
+  wealthOverview(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Query('month') month?: string,
+  ) {
+    return this.readModel.getWealthOverview(toCtx(user, req), month);
+  }
+
+  @Get('wealth/clients/:clientId')
+  @Roles('banker', 'supervisor', 'socio', 'operacoes', 'admin')
+  @ApiOperation({ summary: 'Posicoes, movimentacoes e receita XP por cliente' })
+  clientWealth(
+    @CurrentUser() user: JwtPayload,
+    @Req() req: any,
+    @Param('clientId', new ParseUUIDPipe({ version: '4' })) clientId: string,
+    @Query('month') month?: string,
+  ) {
+    return this.readModel.getClientWealth(toCtx(user, req), clientId, month);
   }
 
   // ── Sincronização (socio/admin) ─────────────────────────────
