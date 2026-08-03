@@ -214,7 +214,20 @@ export class XpReadModelService {
           AND to_char(c.competence_date, 'YYYY-MM') = ${month}
       `;
 
-      const brlPositions = positions.filter((row: any) => row.currency === 'BRL');
+      const nullableNumber = (value: unknown) => value == null ? null : Number(value);
+      const normalizedPositions = positions.map((row: any) => ({
+        ...row,
+        quantity: nullableNumber(row.quantity),
+        unitPrice: nullableNumber(row.unitPrice),
+        grossValue: Number(row.grossValue ?? 0),
+        netValue: nullableNumber(row.netValue),
+        investedValue: nullableNumber(row.investedValue),
+      }));
+      const normalizedMovements = movements.map((row: any) => ({
+        ...row,
+        amount: Number(row.amount ?? 0),
+      }));
+      const brlPositions = normalizedPositions.filter((row: any) => row.currency === 'BRL');
       const summary = brlPositions.reduce((acc: any, row: any) => ({
         grossValue: acc.grossValue + Number(row.grossValue ?? 0),
         netValue: acc.netValue + Number(row.netValue ?? 0),
@@ -229,7 +242,7 @@ export class XpReadModelService {
         available: true,
         month,
         client: { id: client.id, fullName: client.fullName },
-        asOfDate: positions.reduce<string | null>((latest, row: any) =>
+        asOfDate: normalizedPositions.reduce<string | null>((latest, row: any) =>
           !latest || row.asOfDate > latest ? row.asOfDate : latest, null),
         summary,
         monthly: {
@@ -244,8 +257,8 @@ export class XpReadModelService {
           percentage: summary.grossValue > 0
             ? Number(((value / summary.grossValue) * 100).toFixed(2)) : 0,
         })).sort((a, b) => b.value - a.value),
-        positions,
-        recentMovements: movements,
+        positions: normalizedPositions,
+        recentMovements: normalizedMovements,
       };
     });
   }

@@ -74,4 +74,35 @@ describe('XpReadModelService', () => {
       recentMovements: [],
     });
   });
+
+  it('normaliza NUMERIC do PostgreSQL antes de devolver ao frontend', async () => {
+    const results = [
+      [],
+      [{ id: '33333333-3333-4333-8333-333333333333', fullName: 'Cliente Teste' }],
+      [{ id: 'a', accountNumberMask: '***1234', linkStatus: 'linked' }],
+      [{
+        accountId: 'a', asOfDate: '2026-08-01', assetClass: 'Renda Fixa',
+        productName: 'CDB', quantity: '2.5', unitPrice: '100.00',
+        grossValue: '250.00', netValue: '248.00', investedValue: '200.00',
+        currency: 'BRL',
+      }],
+      [{ occurredAt: '2026-08-02', amount: '1000.50', currency: 'BRL' }],
+      [{ netCapture: '1000.50' }],
+      [{ gross: '50.25', net: '40.10' }],
+    ];
+    const tx = jest.fn(async () => results.shift() ?? []);
+    const sql = { begin: (fn: any) => fn(tx) } as any;
+    const config = { get: jest.fn().mockReturnValue('true') } as unknown as ConfigService;
+    const service = new XpReadModelService(sql, config);
+
+    const result = await service.getClientWealth(
+      CTX,
+      '33333333-3333-4333-8333-333333333333',
+      '2026-08',
+    );
+    expect(result.positions[0]).toMatchObject({
+      quantity: 2.5, unitPrice: 100, grossValue: 250, netValue: 248,
+    });
+    expect(result.recentMovements[0].amount).toBe(1000.5);
+  });
 });
