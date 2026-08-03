@@ -511,7 +511,10 @@ d('Integracao XP - banco real', () => {
 
   it('read model usa somente a ultima posicao por conta e consolida o mes', async () => {
     const [connection] = await withRls(sql, ctxA, (tx) => tx`
-      SELECT id FROM integrations.xp_connections WHERE tenant_id = ${tenantA}
+      INSERT INTO integrations.xp_connections (tenant_id)
+      VALUES (${tenantA})
+      ON CONFLICT (tenant_id) DO UPDATE SET updated_at = NOW()
+      RETURNING id
     `);
     const [account] = await withRls(sql, ctxA, (tx) => tx`
       INSERT INTO integrations.xp_accounts
