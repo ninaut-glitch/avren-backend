@@ -128,7 +128,8 @@ export class LeadsRepository {
       const [row] = await tx`
         INSERT INTO crm.leads (
           tenant_id, full_name, email, phone, banker_id,
-          origem_tipo, contexto_relacionamento, estimated_aum, priority
+          origem_tipo, contexto_relacionamento, estimated_aum, priority,
+          tipo_pessoa
         ) VALUES (
           ${ctx.tenantId},
           ${dto.full_name},
@@ -138,7 +139,8 @@ export class LeadsRepository {
           ${dto.origem_tipo ?? null},
           ${dto.contexto_relacionamento ?? null},
           ${dto.estimated_aum ?? null},
-          ${dto.priority ?? 'med'}
+          ${dto.priority ?? 'med'},
+          ${dto.tipo_pessoa ?? null}
         )
         RETURNING *
       `;
@@ -165,7 +167,8 @@ export class LeadsRepository {
           origem_tipo = COALESCE(${dto.origem_tipo ?? null}, origem_tipo),
           contexto_relacionamento = COALESCE(${dto.contexto_relacionamento ?? null}, contexto_relacionamento),
           estimated_aum = COALESCE(${dto.estimated_aum ?? null}, estimated_aum),
-          priority = COALESCE(${dto.priority ?? null}, priority)
+          priority = COALESCE(${dto.priority ?? null}, priority),
+          tipo_pessoa = COALESCE(${dto.tipo_pessoa ?? null}, tipo_pessoa)
         WHERE id = ${id}
           ${scope}
         RETURNING *
