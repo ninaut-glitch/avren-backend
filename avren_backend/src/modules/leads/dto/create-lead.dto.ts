@@ -20,6 +20,7 @@ export enum OrigemTipo {
   SOCIO = 'socio', BANKER = 'banker', EVENTO = 'evento',
   DIGITAL = 'digital', INDICACAO = 'indicacao',
 }
+export enum TipoPessoa { PF = 'pf', PJ = 'pj' }
 
 export class CreateLeadDto {
   @ApiProperty()
@@ -64,6 +65,14 @@ export class CreateLeadDto {
   @IsOptional()
   @IsEnum(LeadPriority)
   priority?: LeadPriority = LeadPriority.MED;
+
+  @ApiPropertyOptional({
+    enum: TipoPessoa,
+    description: 'pf = pessoa física, pj = pessoa jurídica (empresa)',
+  })
+  @IsOptional()
+  @IsEnum(TipoPessoa)
+  tipo_pessoa?: TipoPessoa;
 }
 
 export class UpdateLeadStageDto {
