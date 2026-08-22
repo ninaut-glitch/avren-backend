@@ -28,6 +28,12 @@ export class CommunityService {
     return event;
   }
 
+  // Eventos dos quais um lead participou. Passthrough direto: não valida um evento
+  // específico (a busca é por lead); RLS já restringe ao tenant do contexto.
+  async findEventsByLead(ctx: SessionContext, leadId: string) {
+    return this.repo.findEventsByLead(ctx, leadId);
+  }
+
   async create(ctx: SessionContext, dto: CreateEventDto) {
     return this.repo.create(ctx, dto);
   }
