@@ -44,6 +44,17 @@ export class CommunityController {
     return this.service.create(this.ctx(user, req), dto);
   }
 
+  // IMPORTANTE: esta rota precisa vir ANTES de @Get(':id'), senão o Nest casaria
+  // "by-lead" como :id e o ParseUUIDPipe rejeitaria (400). Lista os eventos de um lead.
+  @Get('by-lead/:leadId')
+  @ApiOperation({ summary: 'Lista os eventos dos quais um lead participou' })
+  findByLead(
+    @CurrentUser() user: JwtPayload, @Req() req: any,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+  ) {
+    return this.service.findEventsByLead(this.ctx(user, req), leadId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Retorna evento pelo ID' })
   findOne(
