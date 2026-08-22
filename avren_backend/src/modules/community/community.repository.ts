@@ -52,6 +52,27 @@ export class CommunityRepository {
     });
   }
 
+  // Eventos dos quais um LEAD participou (espelha findParticipants, na direção inversa).
+  // Junta event_participants -> events pelo lead_id; traz status de presença e quem criou o evento.
+  async findEventsByLead(ctx: SessionContext, leadId: string) {
+    return withRls(this.sql, ctx, async (tx) => tx`
+      SELECT
+        e.*,
+        ep.id           AS participation_id,
+        ep.status       AS participation_status,
+        ep.notes        AS participation_notes,
+        ep.invited_by   AS participation_invited_by,
+        iu.full_name    AS invited_by_name,
+        u.full_name     AS created_by_name
+      FROM community.event_participants ep
+      JOIN community.events e ON e.id = ep.event_id
+      LEFT JOIN auth.users u  ON u.id = e.created_by
+      LEFT JOIN auth.users iu ON iu.id = ep.invited_by
+      WHERE ep.lead_id = ${leadId}
+      ORDER BY e.event_date DESC
+    `);
+  }
+
   async create(ctx: SessionContext, dto: CreateEventDto) {
     return withRls(this.sql, ctx, async (tx) => {
       const [row] = await tx`
@@ -86,15 +107,15 @@ export class CommunityRepository {
     return withRls(this.sql, ctx, async (tx) => tx`
       SELECT
         ep.*,
-        COALESCE(c.full_name, l.full_name)          AS participant_name,
+        COALESCE(c.full_name, l.full_name) AS participant_name,
         CASE WHEN ep.lead_id IS NOT NULL
-             THEN 'lead' ELSE 'client' END          AS participant_type,
-        COALESCE(c.full_name, l.full_name)          AS client_name,
-        u.full_name                                 AS invited_by_name
+          THEN 'lead' ELSE 'client' END AS participant_type,
+        COALESCE(c.full_name, l.full_name) AS client_name,
+        u.full_name AS invited_by_name
       FROM community.event_participants ep
       LEFT JOIN wealth.clients c ON c.id = ep.client_id
-      LEFT JOIN crm.leads     l ON l.id = ep.lead_id
-      LEFT JOIN auth.users    u ON u.id = ep.invited_by
+      LEFT JOIN crm.leads l ON l.id = ep.lead_id
+      LEFT JOIN auth.users u ON u.id = ep.invited_by
       WHERE ep.event_id = ${eventId}
       ORDER BY ep.status, participant_name
     `);
